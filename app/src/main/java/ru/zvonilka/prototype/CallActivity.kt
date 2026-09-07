@@ -26,6 +26,10 @@ import androidx.compose.ui.unit.*
 import kotlinx.coroutines.delay
 
 class CallActivity : ComponentActivity() {
+    private var appliedTheme="system"
+    override fun attachBaseContext(base: android.content.Context) { super.attachBaseContext(ThemeSettings.wrap(base)) }
+    override fun onResume() { super.onResume();if(appliedTheme!=ThemeSettings.mode(this)) recreate() }
+
     private var revision by mutableIntStateOf(0)
     private var selected by mutableStateOf<String?>(null)
     private var toneCall:Call?=null
@@ -33,6 +37,7 @@ class CallActivity : ComponentActivity() {
     private val listener:()->Unit={revision++}
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState);enableEdgeToEdge(statusBarStyle=SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),navigationBarStyle=SystemBarStyle.dark(android.graphics.Color.TRANSPARENT));setShowWhenLocked(true);setTurnScreenOn(true)
+        appliedTheme=ThemeSettings.mode(this)
         CallDiagnostics.record(this, "screen_created")
         selected=savedInstanceState?.getString("selected") ?: intent.getStringExtra("call_id")
         val power=getSystemService(PowerManager::class.java)

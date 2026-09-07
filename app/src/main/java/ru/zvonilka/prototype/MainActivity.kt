@@ -37,6 +37,26 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(base: Context) { super.attachBaseContext(ThemeSettings.wrap(base)) }
+    private var pendingDelete=emptySet<Long>()
+    private val deletePermission=registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val ids=pendingDelete;pendingDelete=emptySet()
+        if(granted) deleteCalls(ids) else error="Удаление недоступно: разрешите изменение журнала в настройках приложения."
+    }
+    private fun deleteCalls(ids:Set<Long>) {
+        if(ids.isEmpty()) return
+        if(!data.allowed(Manifest.permission.WRITE_CALL_LOG)) { pendingDelete=ids;deletePermission.launch(Manifest.permission.WRITE_CALL_LOG);return }
+        lifecycleScope.launch {
+            loading=true
+            runCatching { withContext(Dispatchers.IO) { data.deleteHistory(ids) } }
+                .onSuccess { history=history.filterNot{it.id in ids};toast("Записи удалены") }
+                .onFailure { error="Не удалось удалить записи: ${it.message}" }
+            refresh()
+        }
+    }
+    private fun confirmDelete(ids:Set<Long>) {
+        confirmation=(if(ids.size==1) "Удалить этот вызов из журнала телефона?" else "Удалить выбранные вызовы (${ids.size}) из журнала телефона?") to { deleteCalls(ids) }
+    }
     private val data by lazy { PhoneData(this) }
     private var people by mutableStateOf(emptyList<PersonRecord>())
     private var history by mutableStateOf(emptyList<HistoryRecord>())
@@ -76,7 +96,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         number=savedInstanceState?.getString("number").orEmpty()
-        handle(intent)
+        tab=savedInstanceState?.getInt("tab") ?: 0
+        settings=savedInstanceState?.getBoolean("settings") ?: false
+        pendingDelete=savedInstanceState?.getLongArray("pendingDelete")?.toSet().orEmpty()
+        if(savedInstanceState==null) handle(intent)
         setContent { PhoneTheme { App() } }
     }
     override fun onNewIntent(intent:Intent) { super.onNewIntent(intent);setIntent(intent);handle(intent) }
@@ -84,7 +107,7 @@ class MainActivity : ComponentActivity() {
         if(intent.action=="recent") { tab=0;settings=false;selected=null }
         if(intent.action==Intent.ACTION_DIAL) { tab=2;number=NumberTools.clean(intent.data?.schemeSpecificPart.orEmpty()) }
     }
-    override fun onSaveInstanceState(outState:Bundle) { outState.putString("number",number);super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState:Bundle) { outState.putString("number",number);outState.putInt("tab",tab);outState.putBoolean("settings",settings);outState.putLongArray("pendingDelete",pendingDelete.toLongArray());super.onSaveInstanceState(outState) }
     override fun onResume() { super.onResume();refresh() }
     private fun refresh() {
         lifecycleScope.launch {
@@ -135,7 +158,7 @@ class MainActivity : ComponentActivity() {
                 IconButton(onClick={settings=!settings}) { Icon(Icons.Default.Settings,"Настройки") }
             }) },bottomBar={ if(!settings && selected==null) NavigationBar(containerColor=MaterialTheme.colorScheme.surface,tonalElevation=0.dp) {
                 listOf(Icons.Default.History,Icons.Default.Contacts,Icons.Default.Dialpad).forEachIndexed { i,icon->
-                    NavigationBarItem(selected=tab==i,onClick={tab=i;if(i==0) MissedCalls.clear(this@MainActivity)},icon={Icon(icon,null)},label={Text(listOf("Недавние","Контакты","Клавиши")[i])})
+                    NavigationBarItem(colors=NavigationBarItemDefaults.colors(indicatorColor=Color.Transparent,selectedIconColor=MaterialTheme.colorScheme.primary,selectedTextColor=MaterialTheme.colorScheme.primary),selected=tab==i,onClick={tab=i;if(i==0) MissedCalls.clear(this@MainActivity)},icon={Icon(icon,null)},label={Text(listOf("Недавние","Контакты","Клавиши")[i])})
                 }
             } }) { padding->
             Column(Modifier.padding(padding).fillMaxSize()) {
@@ -181,36 +204,65 @@ class MainActivity : ComponentActivity() {
     @Composable private fun HistoryList(rows:List<HistoryRecord>) {
         var expanded by remember { mutableStateOf<Long?>(null) }
         var chosen by remember { mutableStateOf(emptySet<Long>()) }
+        var editMode by remember { mutableStateOf(false) }
+        var missedOnly by remember { mutableStateOf(false) }
+        var contextCall by remember { mutableStateOf<HistoryRecord?>(null) }
+        val visible=if(missedOnly) rows.filter{it.type==CallLog.Calls.MISSED_TYPE} else rows
+        LaunchedEffect(rows) { chosen=chosen.intersect(rows.map{it.id}.toSet()) }
         Column {
-            if(chosen.isNotEmpty()) Row {
-                TextButton(onClick={confirmation="Удалить выбранные вызовы (${chosen.size})?" to { val ids=chosen;chosen=emptySet();work { data.deleteHistory(ids) } }}) { Text("Удалить (${chosen.size})") }
-                TextButton(onClick={confirmation="Очистить всю показанную историю (${rows.size})?" to { val ids=rows.map { it.id }.toSet();chosen=emptySet();work { data.deleteHistory(ids) } }}) { Text("Очистить всё") }
-                TextButton(onClick={chosen=emptySet()}) { Text("Отмена") }
+            Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
+                Row(Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected=!missedOnly,onClick={missedOnly=false},label={Text("Все")})
+                    FilterChip(selected=missedOnly,onClick={missedOnly=true},label={Text("Пропущенные")})
+                }
+                TextButton(onClick={editMode=!editMode;chosen=emptySet()}){Text(if(editMode) "Готово" else "Править")}
             }
-            LazyColumn(contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                if(rows.isEmpty()) item { EmptySection("Пока ни одного вызова","Ваша история появится здесь после первого звонка") }
-                items(rows,key={it.id}) { h->
+            if(editMode) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),verticalAlignment=Alignment.CenterVertically) {
+                TextButton(onClick={chosen=visible.map{it.id}.toSet()}){Text("Выбрать все")}
+                TextButton(enabled=chosen.isNotEmpty() && !loading,onClick={confirmDelete(chosen.toSet())}){Text("Удалить (${chosen.size})",color=MaterialTheme.colorScheme.error)}
+            }
+            LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(horizontal=16.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(1.dp)) {
+                if(visible.isEmpty()) item { EmptySection(if(missedOnly) "Нет пропущенных" else "Пока ни одного вызова","Здесь будет ваша история звонков") }
+                items(visible,key={it.id}) { h->
                     val p=people.firstOrNull { it.numbers.any { n->NumberTools.key(n)==NumberTools.key(h.number) } }
                     val color=historyColor(h.type)
                     val kind=when(h.type) { CallLog.Calls.MISSED_TYPE->"Пропущенный";CallLog.Calls.OUTGOING_TYPE->"Исходящий";CallLog.Calls.REJECTED_TYPE->"Отклонённый";else->"Входящий" }
-                    SwipeCall(onCall={dial(h.number)},onTap={if(chosen.isNotEmpty()) chosen=if(h.id in chosen) chosen-h.id else chosen+h.id else expanded=if(expanded==h.id) null else h.id},onLong={chosen=chosen+h.id}) {
-                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    fun selectRow() { chosen=if(h.id in chosen) chosen-h.id else chosen+h.id }
+                    SwipeCall(enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h}) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=10.dp)) {
                             Row(verticalAlignment=Alignment.CenterVertically) {
-                                Icon(if(h.type==CallLog.Calls.OUTGOING_TYPE) Icons.Default.CallMade else if(h.type==CallLog.Calls.MISSED_TYPE) Icons.Default.CallMissed else Icons.Default.CallReceived,null,modifier=Modifier.clip(CircleShape).background(color.copy(alpha=.12f)).padding(10.dp).size(20.dp),tint=color)
+                                if(editMode) Checkbox(checked=h.id in chosen,onCheckedChange={selectRow()})
+                                Photo(p,Modifier.size(44.dp).clip(CircleShape))
                                 Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) { Text(p?.name ?: NumberTools.display(h.number).ifBlank { "Скрытый номер" },color=color,style=MaterialTheme.typography.titleMedium)
-                                    Text(SimpleDateFormat("dd.MM · HH:mm",Locale.getDefault()).format(h.date)+" · "+NumberTools.duration(h.seconds),style=MaterialTheme.typography.bodySmall)
-                                    Text(simLabel(h.accountId),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
-                                if(h.id in chosen) Icon(Icons.Default.CheckCircle,null,tint=MaterialTheme.colorScheme.primary) else Icon(Icons.Default.ExpandMore,null,tint=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.size(20.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(p?.name ?: NumberTools.display(h.number).ifBlank { "Скрытый номер" },color=color,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                    Row(verticalAlignment=Alignment.CenterVertically) {
+                                        Icon(if(h.type==CallLog.Calls.OUTGOING_TYPE) Icons.Default.CallMade else if(h.type==CallLog.Calls.MISSED_TYPE) Icons.Default.CallMissed else Icons.Default.CallReceived,null,Modifier.size(14.dp),tint=color)
+                                        Spacer(Modifier.width(4.dp));Text(simLabel(h.accountId)+" · "+NumberTools.duration(h.seconds),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Text(SimpleDateFormat("dd.MM · HH:mm",Locale.getDefault()).format(h.date),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                IconButton(onClick={expanded=if(expanded==h.id) null else h.id}){Icon(Icons.Default.Info,"Сведения о вызове",tint=MaterialTheme.colorScheme.primary,modifier=Modifier.size(22.dp))}
                             }
                             if(expanded==h.id) {
-                                Text("$kind · "+SimpleDateFormat("dd.MM.yyyy HH:mm:ss",Locale.getDefault()).format(h.date),Modifier.padding(top=12.dp))
-                                Row { TextButton(onClick={dial(h.number)}) { Text("Позвонить") };TextButton(onClick={copy(h.number)}){Text("Копировать")};if(p!=null)TextButton(onClick={selected=p}){Text("Контакт")} }
+                                HorizontalDivider(Modifier.padding(vertical=10.dp),color=MaterialTheme.colorScheme.outlineVariant)
+                                Text("$kind · "+SimpleDateFormat("dd.MM.yyyy HH:mm:ss",Locale.getDefault()).format(h.date),style=MaterialTheme.typography.bodySmall)
+                                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                                    TextButton(onClick={dial(h.number)}) { Text("Позвонить") }
+                                    TextButton(onClick={copy(h.number)}){Text("Копировать")}
+                                    if(p!=null)TextButton(onClick={selected=p}){Text("Контакт")}
+                                }
+                                TextButton(enabled=!loading,onClick={confirmDelete(setOf(h.id))}) { Icon(Icons.Default.Delete,null,Modifier.size(18.dp),tint=MaterialTheme.colorScheme.error);Spacer(Modifier.width(6.dp));Text("Удалить вызов",color=MaterialTheme.colorScheme.error) }
                             }
                         }
                     }
                 }
             }
+        }
+        contextCall?.let { h ->
+            AlertDialog(onDismissRequest={contextCall=null},title={Text("Действия с вызовом")},text={Text(NumberTools.display(h.number))},
+                confirmButton={TextButton(onClick={contextCall=null;confirmDelete(setOf(h.id))}){Text("Удалить",color=MaterialTheme.colorScheme.error)}},
+                dismissButton={TextButton(onClick={contextCall=null}){Text("Отмена")}})
         }
     }
     private fun simLabel(id:String?) = Dialing.accounts(this).firstOrNull { it.id==id }?.let { Dialing.label(this,it) } ?: "SIM не указана"
@@ -238,20 +290,23 @@ class MainActivity : ComponentActivity() {
             }
             listOf("123","456","789","*0#").forEach { line->Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
                 line.forEach { digit->
-                    Surface(Modifier.padding(4.dp).weight(1f).height(60.dp).combinedClickable(onClick={
+                    Surface(Modifier.padding(vertical=4.dp).size(76.dp).combinedClickable(onClick={
                         number+=digit;picked=false
                         if(getSharedPreferences("settings",0).getBoolean("haptic",true)) window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                    },onLongClick={if(digit=='0') { number+="+";picked=false }}),shape=RoundedCornerShape(22.dp),color=MaterialTheme.colorScheme.surface) {
+                    },onLongClick={if(digit=='0') { number+="+";picked=false }}),shape=CircleShape,color=MaterialTheme.colorScheme.surfaceVariant) {
                         Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
-                            Text(digit.toString(),fontSize=28.sp,fontWeight=FontWeight.Medium,color=MaterialTheme.colorScheme.onSurface)
-                            Text(when(digit){'2'->"ABC АБВГ";'3'->"DEF ДЕЁЖЗ";'4'->"GHI ИЙКЛ";'5'->"JKL МНО";'6'->"MNO ПРС";'7'->"PQRS ТУФХ";'8'->"TUV ЦЧШЩ";'9'->"WXYZ ЪЫЬЭЮЯ";'0'->"+";else->""},fontSize=8.sp,lineHeight=10.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(digit.toString(),fontSize=32.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurface)
+                            Text(when(digit){'2'->"ABC\nАБВГ";'3'->"DEF\nДЕЁЖЗ";'4'->"GHI\nИЙКЛ";'5'->"JKL\nМНО";'6'->"MNO\nПРС";'7'->"PQRS\nТУФХ";'8'->"TUV\nЦЧШЩ";'9'->"WXYZ\nЪЫЬЭЮЯ";'0'->"+";else->""},fontSize=8.sp,lineHeight=9.sp,textAlign=androidx.compose.ui.text.style.TextAlign.Center,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
             } }
             val ignored=simRevision
-            Box(Modifier.fillMaxWidth().padding(vertical=8.dp).height(62.dp).clip(CircleShape).background(Green).combinedClickable(onClick={dial(number)},onLongClick={Dialing.choose(this@MainActivity,number.ifBlank { null }){simRevision++}}),contentAlignment=Alignment.Center) {
-                Row(verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Default.Call,"Позвонить",tint=Color.White);Spacer(Modifier.width(12.dp));Text(Dialing.selectedLabel(this@MainActivity,number),color=Color.White) }
+            Column(Modifier.align(Alignment.CenterHorizontally).padding(vertical=8.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+                Box(Modifier.size(76.dp).clip(CircleShape).background(Green).combinedClickable(onClick={dial(number)},onLongClick={Dialing.choose(this@MainActivity,number.ifBlank { null }){simRevision++}}),contentAlignment=Alignment.Center) {
+                    Icon(Icons.Default.Call,"Позвонить; удерживать для выбора SIM",Modifier.size(32.dp),tint=Color.White)
+                }
+                Text(Dialing.selectedLabel(this@MainActivity,number),Modifier.padding(top=4.dp),style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -309,7 +364,12 @@ class MainActivity : ComponentActivity() {
             SectionLabel("ОФОРМЛЕНИЕ")
             SettingsGroup {
             Text("Сине-бело-голубая тема",style=MaterialTheme.typography.titleMedium)
-            Text("Светлая и тёмная: как в системе",color=MaterialTheme.colorScheme.onSurfaceVariant)
+            listOf("system" to "Как в системе","light" to "Светлая","dark" to "Тёмная").forEach { (mode,label) ->
+                Row(Modifier.fillMaxWidth().clickable { if(ThemeSettings.mode(this@MainActivity)!=mode) { ThemeSettings.set(this@MainActivity,mode);recreate() } },verticalAlignment=Alignment.CenterVertically) {
+                    RadioButton(selected=ThemeSettings.mode(this@MainActivity)==mode,onClick={if(ThemeSettings.mode(this@MainActivity)!=mode) { ThemeSettings.set(this@MainActivity,mode);recreate() }})
+                    Text(label,style=MaterialTheme.typography.bodyLarge)
+                }
+            }
             Row(verticalAlignment=Alignment.CenterVertically) { Text("Вибрация клавиш",Modifier.weight(1f));Switch(haptic,{haptic=it;getSharedPreferences("settings",0).edit().putBoolean("haptic",it).apply()}) }
             }
             SectionLabel("ЗВОНКИ И ДОСТУП")

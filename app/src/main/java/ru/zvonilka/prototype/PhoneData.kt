@@ -85,9 +85,17 @@ class PhoneData(private val context: Context) {
         return out
     }
     fun deleteHistory(ids:Set<Long>) {
-        // Atomic and explicitly limited to the records selected in the UI.
-        val ops=ArrayList(ids.map { ContentProviderOperation.newDelete(ContentUris.withAppendedId(CallLog.Calls.CONTENT_URI,it)).build() })
-        if(ops.isNotEmpty()) cr.applyBatch(CallLog.AUTHORITY,ops)
+        require(allowed(android.Manifest.permission.WRITE_CALL_LOG)) { "Нет разрешения на изменение журнала" }
+        if(ids.isEmpty()) return
+        // Bound both binder payload and selection parameters. Never use an unfiltered delete.
+        ids.toList().chunked(200).forEach { chunk ->
+            val selection="${CallLog.Calls._ID} IN (${chunk.joinToString(",") { "?" }})"
+            val args=chunk.map { it.toString() }.toTypedArray()
+            cr.delete(CallLog.Calls.CONTENT_URI,selection,args)
+            cr.query(CallLog.Calls.CONTENT_URI,arrayOf(CallLog.Calls._ID),selection,args,null)?.use {
+                check(!it.moveToFirst()) { "Телефон не удалил выбранные записи" }
+            } ?: error("Не удалось проверить удаление")
+        }
     }
     // Read the display photo of this local raw contact, never an aggregated cloud photo.
     // Called on Dispatchers.IO only, and only for a large photo surface.

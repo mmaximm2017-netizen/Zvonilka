@@ -94,14 +94,15 @@ val Sky=Color(0xFFE8F3FF)
     }
 }
 @OptIn(ExperimentalFoundationApi::class)
-@Composable fun SwipeCall(modifier:Modifier=Modifier,onCall:()->Unit,onTap:()->Unit,onLong:()->Unit={},content:@Composable ()->Unit) {
+@Composable fun SwipeCall(modifier:Modifier=Modifier,onCall:()->Unit,onTap:()->Unit,onLong:()->Unit={},enabled:Boolean=true,content:@Composable ()->Unit) {
     val offset=remember { Animatable(0f) }; val scope=rememberCoroutineScope(); var width by remember { mutableIntStateOf(1) }
     val view=LocalView.current
     val call by rememberUpdatedState(onCall)
     Box(modifier.clip(RoundedCornerShape(20.dp)).background(Ocean).onSizeChanged { width=it.width }) {
         Icon(Icons.Default.Call,"Позвонить",Modifier.align(Alignment.CenterStart).padding(24.dp),tint=Color.White)
         Box(Modifier.offset { IntOffset(offset.value.toInt(),0) }.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
-            .pointerInput(width) {
+            .pointerInput(width,enabled) {
+                if(!enabled) return@pointerInput
                 detectHorizontalDragGestures(onDragEnd={
                     val complete=offset.value>=width*0.82f
                     scope.launch {
