@@ -47,7 +47,7 @@ val Blue=Color(0xFF3987DF)
                 detectHorizontalDragGestures(onDragEnd={
                     val complete=offset.value>=width*0.82f
                     scope.launch {
-                        if(complete) { offset.animateTo(width.toFloat());view.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM);call() }
+                        if(complete) { offset.animateTo(width.toFloat());view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);call() }
                         offset.animateTo(0f)
                     }
                 },onDragCancel={scope.launch { offset.animateTo(0f) }}) { change,amount ->
