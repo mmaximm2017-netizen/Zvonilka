@@ -1,0 +1,1 @@
+Temporary placeholder for the UI refinement PR. The implementation agent should remove this file before final review.
