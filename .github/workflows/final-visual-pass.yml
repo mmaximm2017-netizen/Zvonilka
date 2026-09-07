@@ -1,0 +1,48 @@
+name: Final visual pass 0.11.2
+
+on:
+  push:
+    branches:
+      - ui/final-visual-pass-0.11.2
+    paths:
+      - 'final_visual_pass.py'
+
+permissions:
+  contents: write
+
+jobs:
+  polish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ui/final-visual-pass-0.11.2
+      - name: Apply visual pass
+        run: python final_visual_pass.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Test build and lint
+        run: gradle :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --no-daemon
+      - name: Prepare signing input
+        run: |
+          mkdir -p build/delivery
+          cp app/build/outputs/apk/debug/app-debug.apk build/delivery/app-debug.apk
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" build/delivery/apksigner.jar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zvonilka-0.11.2-signing-input
+          path: build/delivery/
+      - name: Commit implementation
+        run: |
+          git rm final_visual_pass.py .github/workflows/final-visual-pass.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/ru/zvonilka/prototype/MainActivity.kt app/src/main/java/ru/zvonilka/prototype/Ui.kt app/build.gradle.kts
+          git commit -m "Refine visual hierarchy across main screens"
+          git push origin HEAD:ui/final-visual-pass-0.11.2
