@@ -101,8 +101,6 @@ class CallActivity : ComponentActivity() {
                     Column(Modifier.fillMaxWidth().widthIn(max=420.dp).padding(top=28.dp),horizontalAlignment=Alignment.CenterHorizontally) {
                         live.forEach { (id,other)->if(id!=key) TextButton(onClick={selected=id}){Text("${ContactCache.find(CallStore.label(other))?.name ?: CallStore.label(other)} · ${CallStore.state(other)}",color=white,textAlign=TextAlign.Center)} }
                         if(ringing && call!=null) {
-                            Control("Отклонить",Icons.Default.CallEnd,color=Color(0xFFFF453A)){if(call.state==Call.STATE_RINGING)call.reject(false,null)}
-                            Spacer(Modifier.height(if(compact)24.dp else 38.dp))
                             key(key) { CallSlideAction("Ответить",Color(0xFF34C759),Icons.Default.Call){if(call.state==Call.STATE_RINGING)call.answer(VideoProfile.STATE_AUDIO_ONLY)} }
                             Spacer(Modifier.height(if(compact)12.dp else 32.dp))
                         } else if(call!=null) {

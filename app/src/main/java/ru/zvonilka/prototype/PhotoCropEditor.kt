@@ -77,7 +77,7 @@ import kotlinx.coroutines.withContext
                         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x66071A31),Color.Transparent,Color(0xAA071A31)))))
                         Column(Modifier.align(Alignment.TopCenter).padding(top=28.dp),horizontalAlignment=Alignment.CenterHorizontally) { Text(name.ifBlank{"Имя контакта"},fontSize=18.sp,color=Color.White);Text("SIM · Входящий вызов",fontSize=11.sp,color=Color.White) }
                         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                            listOf("Отклонить" to Red,"Ответить →" to Color.White.copy(alpha=.3f)).forEach { (label,color) ->
+                            listOf("Ответить →" to Color.White.copy(alpha=.3f)).forEach { (label,color) ->
                                 Box(Modifier.fillMaxWidth().height(36.dp).clip(CircleShape).background(color.copy(alpha=.65f)),contentAlignment=Alignment.Center) { Text(label,fontSize=12.sp,color=Color.White) }
                             }
                         }

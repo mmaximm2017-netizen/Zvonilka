@@ -32,6 +32,9 @@
             <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
             <intent-filter><action android:name="android.telecom.InCallService" /></intent-filter>
         </service>
+        <receiver android:name=".SystemMissedReceiver" android:exported="true" android:permission="android.permission.MODIFY_PHONE_STATE">
+            <intent-filter><action android:name="android.telecom.action.SHOW_MISSED_CALLS_NOTIFICATION" /></intent-filter>
+        </receiver>
         <receiver android:name=".MissedReceiver" android:exported="false" />
         <receiver android:name=".CallActionReceiver" android:exported="false" />
     </application>
