@@ -150,8 +150,18 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         if(z>3f) sawFaceUp=true
         downSamples=if(sawFaceUp && z < -7f) downSamples+1 else 0
         if(downSamples>=3) {
-            getSystemService(TelecomManager::class.java).silenceRinger()
+            silenceForDialerRole()
             sensors.unregisterListener(this)
+        }
+    }
+    // Android documents ROLE_DIALER as an alternative to privileged MODIFY_PHONE_STATE.
+    // Lint models only the privileged permission; enforce the documented role at runtime.
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun silenceForDialerRole() {
+        val telecom=getSystemService(TelecomManager::class.java)
+        if(telecom.defaultDialerPackage!=packageName) return
+        try { telecom.silenceRinger() } catch (_:SecurityException) {
+            android.util.Log.w("Zvonilka", "Ringer control unavailable after role change")
         }
     }
     override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
