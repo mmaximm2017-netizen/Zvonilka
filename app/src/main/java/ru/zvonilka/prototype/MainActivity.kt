@@ -51,9 +51,15 @@ class MainActivity : ComponentActivity() {
         if(!data.allowed(Manifest.permission.WRITE_CALL_LOG)) { pendingDelete=ids;deletePermission.launch(Manifest.permission.WRITE_CALL_LOG);return }
         lifecycleScope.launch {
             loading=true
-            runCatching { withContext(Dispatchers.IO) { data.deleteHistory(ids) } }
-                .onSuccess { history=history.filterNot{it.id in ids};toast("Записи удалены") }
-                .onFailure { error="Не удалось удалить записи: ${it.message}" }
+            try {
+                runCatching { withContext(Dispatchers.IO) { data.deleteHistory(ids) } }
+                    .onSuccess {
+                        history=history.filterNot{it.id in ids};HistoryCache.items=history
+                        withContext(Dispatchers.IO){HistorySnapshot.save(this@MainActivity,history)}
+                        toast("Записи удалены")
+                    }
+                    .onFailure { error="Не удалось удалить записи: ${it.message}" }
+            } finally { loading=false }
             refresh()
         }
     }
@@ -83,6 +89,7 @@ class MainActivity : ComponentActivity() {
     private val missedListener=android.content.SharedPreferences.OnSharedPreferenceChangeListener { _,_->missedCount=MissedCalls.count(this) }
     private var callScreenIssue by mutableStateOf<String?>(null)
     private var simRevision by mutableIntStateOf(0)
+    private var refreshJob:Job?=null
     private val photoPicker=registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if(uri!=null) lifecycleScope.launch { runCatching { withContext(Dispatchers.IO) { data.photo(uri) } }.onSuccess { cropSource=it }.onFailure { error="Не удалось прочитать фото" } }
     }
@@ -114,6 +121,7 @@ class MainActivity : ComponentActivity() {
         tab=savedInstanceState?.getInt("tab") ?: 0
         settings=savedInstanceState?.getBoolean("settings") ?: false
         pendingDelete=savedInstanceState?.getLongArray("pendingDelete")?.toSet().orEmpty()
+        if(history.isEmpty()) { history=HistorySnapshot.load(this);HistoryCache.items=history }
         if(savedInstanceState==null) handle(intent)
         setContent { PhoneTheme { App() } }
     }
@@ -127,23 +135,29 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {getSharedPreferences("missed",0).unregisterOnSharedPreferenceChangeListener(missedListener);super.onStop()}
     override fun onResume() { super.onResume();callScreenIssue=CallScreenAccess.issue(this);refresh() }
     private fun refresh() {
-        lifecycleScope.launch {
+        refreshJob?.cancel()
+        refreshJob=lifecycleScope.launch {
             val historyLoad=async(Dispatchers.IO) { runCatching { data.history() } }
             val contactsLoad=async(Dispatchers.IO) { runCatching { data.contacts() } }
 
             historyLoad.await()
-                .onSuccess { h-> history=h;HistoryCache.items=h;if(tab==0) MissedCalls.clear(this@MainActivity) }
-                .onFailure { error="Не удалось загрузить журнал: ${it.message}" }
+                .onSuccess { h->
+                    history=h;HistoryCache.items=h
+                    withContext(Dispatchers.IO){HistorySnapshot.save(this@MainActivity,h)}
+                    if(tab==0) MissedCalls.clear(this@MainActivity)
+                }
+                .onFailure { if(it !is CancellationException) error="Не удалось загрузить журнал: ${it.message}" }
 
             contactsLoad.await()
                 .onSuccess { p-> people=p;simStatus=data.sim.status;ContactCache.people=p;selected=selected?.let { old->p.find { it.id==old.id } } }
-                .onFailure { error="Не удалось загрузить контакты: ${it.message}" }
+                .onFailure { if(it !is CancellationException) error="Не удалось загрузить контакты: ${it.message}" }
         }
     }
     private fun work(action:()->Unit) {
         lifecycleScope.launch {
             loading=true
-            runCatching { withContext(Dispatchers.IO) { action() } }.onFailure { error=it.message ?: "Операция не выполнена" }
+            try { runCatching { withContext(Dispatchers.IO) { action() } }.onFailure { error=it.message ?: "Операция не выполнена" } }
+            finally { loading=false }
             refresh()
         }
     }

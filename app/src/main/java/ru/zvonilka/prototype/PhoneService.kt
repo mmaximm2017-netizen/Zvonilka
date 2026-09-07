@@ -37,16 +37,20 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         CallDiagnostics.record(this, "service_create")
         CallStore.service = this
         io.execute {
-            runCatching { PhoneData(this).contacts() }.onSuccess { people ->
-                ContactCache.people=people
+            val phoneData=PhoneData(this)
+            runCatching { phoneData.localContacts() }.onSuccess { localPeople ->
+                // Publish phone-memory contacts immediately. A slow SIM phonebook must not delay
+                // the caller name on the first incoming notification after a cold process start.
+                ContactCache.people=localPeople
+                handler.post {
+                    CallStore.calls.toMap().forEach { (key, call) -> if(call.state!=Call.STATE_DISCONNECTED) refresh(call,key) }
+                    CallStore.changed()
+                }
+                val allPeople=runCatching { phoneData.mergeSim(localPeople) }.getOrElse { localPeople }
+                ContactCache.people=allPeople
                 contactsReady=true
                 handler.post {
-                    // An incoming call can arrive before the asynchronous contacts query finishes.
-                    // Rebuild every still-live call notification so Android CallStyle receives the contact name,
-                    // instead of leaving the initial number-only heads-up notification on screen.
-                    CallStore.calls.toMap().forEach { (key, call) ->
-                        if (call.state != Call.STATE_DISCONNECTED) refresh(call, key)
-                    }
+                    CallStore.calls.toMap().forEach { (key, call) -> if(call.state!=Call.STATE_DISCONNECTED) refresh(call,key) }
                     CallStore.changed()
                 }
             }

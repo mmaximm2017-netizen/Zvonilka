@@ -20,7 +20,7 @@ class PhoneData(private val context: Context) {
     private val cr get() = context.contentResolver
     private val local = "(${CC.RawContacts.ACCOUNT_TYPE} IS NULL OR ${CC.RawContacts.ACCOUNT_TYPE} = 'vnd.sec.contact.phone') AND ${CC.RawContacts.DELETED} = 0"
     fun allowed(permission: String) = context.checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
-    fun contacts(): List<PersonRecord> {
+    fun localContacts(): List<PersonRecord> {
         if (!allowed(android.Manifest.permission.READ_CONTACTS)) return emptyList()
         val ids = mutableListOf<Long>()
         cr.query(CC.RawContacts.CONTENT_URI, arrayOf(CC.RawContacts._ID), local, null, null)?.use { c -> while(c.moveToNext()) ids.add(c.getLong(0)) }
@@ -43,8 +43,13 @@ class PhoneData(private val context: Context) {
             map.forEach { (id,a) -> result.add(PersonRecord(id,a.name.ifBlank { "Без имени" },a.nums.sortedByDescending { it.first }.map { it.second }.distinctBy(NumberTools::key),a.photo)) }
         }
         val collator=Collator.getInstance(Locale("ru"))
-        return SimMerge.merge(result,sim.read()).sortedWith { a,b -> collator.compare(a.name,b.name) }
+        return result.sortedWith { a,b -> collator.compare(a.name,b.name) }
     }
+    fun mergeSim(localContacts:List<PersonRecord>):List<PersonRecord> {
+        val collator=Collator.getInstance(Locale("ru"))
+        return SimMerge.merge(localContacts,sim.read()).sortedWith { a,b -> collator.compare(a.name,b.name) }
+    }
+    fun contacts():List<PersonRecord> = mergeSim(localContacts())
     private fun requireLocal(id: Long) {
         cr.query(CC.RawContacts.CONTENT_URI,arrayOf(CC.RawContacts._ID),"${CC.RawContacts._ID}=? AND $local",arrayOf(id.toString()),null)?.use { require(it.moveToFirst()) { "Контакт недоступен или принадлежит другому аккаунту" } }
             ?: error("Не удалось проверить контакт")
