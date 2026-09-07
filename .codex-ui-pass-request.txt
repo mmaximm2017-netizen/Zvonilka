@@ -1,1 +1,0 @@
-Implement UI_REDESIGN_TASK.md completely in this branch. Remove UI_REDESIGN_TASK.md and this trigger file when finished.
