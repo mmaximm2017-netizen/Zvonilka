@@ -9,8 +9,8 @@ android {
         applicationId = "ru.zvonilka.prototype"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2-dialer"
+        versionCode = 3
+        versionName = "0.2.1-dialer"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -3,12 +3,27 @@ package ru.zvonilka.prototype
 import android.app.*
 import android.content.*
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.telecom.*
 
 class PhoneService : InCallService() {
     private val callbacks = mutableMapOf<Call, Call.Callback>()
     private val ids = mutableMapOf<Call, Int>()
     private var nextId = 100
+    private val handler = Handler(Looper.getMainLooper())
+    private val publishedStates = mutableMapOf<Call, Int>()
+    // A bounded-to-service fallback for missed/delayed lifecycle callbacks.
+    private val reconcile = object : Runnable {
+        override fun run() {
+            val telecomCalls = calls.toSet()
+            CallStore.calls.toMap().forEach { (key, call) ->
+                if (call !in telecomCalls || call.state == Call.STATE_DISCONNECTED) removeCall(call)
+                else if (publishedStates[call] != call.state) refresh(call, key)
+            }
+            if (ids.isNotEmpty()) handler.postDelayed(this, 1000)
+        }
+    }
     private val manager get() = getSystemService(NotificationManager::class.java)
 
     override fun onCreate() {
@@ -24,23 +39,28 @@ class PhoneService : InCallService() {
 
     override fun onCallAdded(call: Call) {
         super.onCallAdded(call)
+        CallStore.service = this
+        if (call in callbacks) return
         val key = CallStore.add(call)
         ids[call] = nextId++
         val callback = object : Call.Callback() {
+            override fun onCallDestroyed(call: Call) = removeCall(call)
             override fun onStateChanged(call: Call, state: Int) = refresh(call, key)
             override fun onDetailsChanged(call: Call, details: Call.Details) = refresh(call, key)
             override fun onConferenceableCallsChanged(call: Call, conferenceableCalls: MutableList<Call>) = refresh(call, key)
         }
         callbacks[call] = callback
-        call.registerCallback(callback)
+        call.registerCallback(callback, handler)
         refresh(call, key)
-        if (call.state != Call.STATE_RINGING) showCall(key)
+        handler.removeCallbacks(reconcile)
+        handler.postDelayed(reconcile, 1000)
+        if (call.state != Call.STATE_RINGING && call.state != Call.STATE_DISCONNECTED) showCall(key)
     }
 
     private fun refresh(call: Call, key: String) {
-        CallStore.changed()
         val id = ids[call] ?: return
-        if (call.state == Call.STATE_DISCONNECTED) { manager.cancel(id); return }
+        if (call.state == Call.STATE_DISCONNECTED) { removeCall(call); return }
+        publishedStates[call] = call.state
         val ringing = call.state == Call.STATE_RINGING
         val open = PendingIntent.getActivity(this, id, Intent(this, CallActivity::class.java).apply {
             putExtra("call_id", key)
@@ -66,6 +86,8 @@ class PhoneService : InCallService() {
         if (Build.VERSION.SDK_INT < 33 || checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             manager.notify(id, builder.build())
         }
+        // Notification cleanup/update must not depend on the activity rendering successfully.
+        CallStore.changed()
     }
 
     private fun showCall(key: String? = null) {
@@ -75,22 +97,37 @@ class PhoneService : InCallService() {
         })
     }
     override fun onBringToForeground(showDialpad: Boolean) = showCall()
-    override fun onCallAudioStateChanged(audioState: CallAudioState) { CallStore.changed() }
-    override fun onCallRemoved(call: Call) {
-        callbacks.remove(call)?.let { call.unregisterCallback(it) }
+    override fun onCallAudioStateChanged(audioState: CallAudioState?) { CallStore.changed() }
+    private fun removeCall(call: Call) {
         ids.remove(call)?.let { manager.cancel(it) }
+        publishedStates.remove(call)
+        callbacks.remove(call)?.let { call.unregisterCallback(it) }
         CallStore.calls.entries.removeAll { it.value == call }
+        if (ids.isEmpty()) handler.removeCallbacks(reconcile)
         CallStore.changed()
+    }
+    override fun onCallRemoved(call: Call) {
+        removeCall(call)
         super.onCallRemoved(call)
     }
-    override fun onDestroy() {
+    private fun clearSession() {
+        handler.removeCallbacks(reconcile)
+        // Includes notifications left behind by a previous service instance.
+        CallNotifications.clear(this)
         callbacks.forEach { (call, callback) -> call.unregisterCallback(callback) }
-        ids.values.forEach { manager.cancel(it) }
         callbacks.clear()
         ids.clear()
+        publishedStates.clear()
         CallStore.calls.clear()
         CallStore.service = null
         CallStore.changed()
+    }
+    override fun onUnbind(intent: Intent?): Boolean {
+        clearSession()
+        return super.onUnbind(intent)
+    }
+    override fun onDestroy() {
+        clearSession()
         super.onDestroy()
     }
 }

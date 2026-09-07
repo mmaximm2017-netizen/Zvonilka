@@ -27,7 +27,7 @@ class MainActivity : Activity() {
             insets
         }
         root.addView(TextView(this).apply {
-            text = "Звонилка · 0.2"
+            text = "Звонилка · 0.2.1"
             textSize = 26f
             setTextColor(Color.WHITE)
         })
