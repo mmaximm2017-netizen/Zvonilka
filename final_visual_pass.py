@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Triggered after the workflow is present on this branch.
 main = Path('app/src/main/java/ru/zvonilka/prototype/MainActivity.kt')
 s = main.read_text()
 replacements = [
