@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.*
@@ -155,10 +156,10 @@ class MainActivity : ComponentActivity() {
             navigationIcon={ if(settings||selected!=null) IconButton(onClick={settings=false;selected=null}) { Icon(Icons.Default.ArrowBack,"Назад") } },
             actions={
                 if(tab==1 && selected==null && !settings) IconButton(onClick={editor(null)}) { Icon(Icons.Default.Add,"Создать контакт") }
-                IconButton(onClick={settings=!settings}) { Icon(Icons.Default.Settings,"Настройки") }
+                IconButton(onClick={settings=!settings}) { Icon(Icons.Outlined.Settings,"Настройки") }
             }) },bottomBar={ if(!settings && selected==null) NavigationBar(containerColor=MaterialTheme.colorScheme.surface,tonalElevation=0.dp) {
-                listOf(Icons.Default.History,Icons.Default.Contacts,Icons.Default.Dialpad).forEachIndexed { i,icon->
-                    NavigationBarItem(colors=NavigationBarItemDefaults.colors(indicatorColor=Color.Transparent,selectedIconColor=MaterialTheme.colorScheme.primary,selectedTextColor=MaterialTheme.colorScheme.primary),selected=tab==i,onClick={tab=i;if(i==0) MissedCalls.clear(this@MainActivity)},icon={Icon(icon,null)},label={Text(listOf("Недавние","Контакты","Клавиши")[i])})
+                listOf(Icons.Outlined.History,Icons.Outlined.Contacts,Icons.Outlined.Dialpad).forEachIndexed { i,icon->
+                    NavigationBarItem(colors=NavigationBarItemDefaults.colors(indicatorColor=Color.Transparent,selectedIconColor=MaterialTheme.colorScheme.primary,selectedTextColor=MaterialTheme.colorScheme.primary),selected=tab==i,onClick={tab=i;if(i==0) MissedCalls.clear(this@MainActivity)},icon={Icon(icon,null,Modifier.size(24.dp))},label={Text(listOf("Недавние","Контакты","Клавиши")[i],fontSize=11.sp,fontWeight=FontWeight.Normal)})
                 }
             } }) { padding->
             Column(Modifier.padding(padding).fillMaxSize()) {
@@ -169,20 +170,26 @@ class MainActivity : ComponentActivity() {
                     selected!=null -> ContactCard(selected!!)
                     tab==0 -> HistoryList(history)
                     tab==1 -> {
-                        OutlinedTextField(query,{query=it},Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=10.dp),placeholder={Text("Имя или номер")},leadingIcon={Icon(Icons.Default.Search,null)},trailingIcon={if(query.isNotEmpty()) IconButton(onClick={query=""}){Icon(Icons.Default.Close,"Очистить поиск")}},shape=RoundedCornerShape(20.dp),colors=OutlinedTextFieldDefaults.colors(unfocusedContainerColor=MaterialTheme.colorScheme.surface,unfocusedBorderColor=MaterialTheme.colorScheme.outlineVariant),singleLine=true)
+                        OutlinedTextField(query,{query=it},Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=10.dp),placeholder={Text("Имя или номер")},leadingIcon={Icon(Icons.Default.Search,null)},trailingIcon={if(query.isNotEmpty()) IconButton(onClick={query=""}){Icon(Icons.Default.Close,"Очистить поиск")}},shape=RoundedCornerShape(14.dp),colors=OutlinedTextFieldDefaults.colors(unfocusedContainerColor=MaterialTheme.colorScheme.surfaceVariant,focusedContainerColor=MaterialTheme.colorScheme.surface,unfocusedBorderColor=Color.Transparent),singleLine=true)
                         val filtered=remember(people,query) { people.filter { NumberTools.matches(it.name,it.numbers,query) } }
                         val state=rememberLazyListState()
                         Row(Modifier.weight(1f)) {
-                            LazyColumn(state=state,modifier=Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=8.dp,bottom=16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                            LazyColumn(state=state,modifier=Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=8.dp,bottom=16.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
                                 if(filtered.isEmpty()) item { EmptySection(if(query.isBlank()) "Здесь будут контакты" else "Ничего не найдено",if(query.isBlank()) "Добавьте первый контакт кнопкой +" else "Попробуйте другое имя или номер") }
-                                items(filtered,key={it.id}) { p-> SwipeCall(onCall={dial(p.primary)},onTap={selected=p}) { PersonRow(p) } }
+                                itemsIndexed(filtered,key={_,p->p.id}) { index,p->
+                                    SwipeCall(shape=listRowShape(index==0,index==filtered.lastIndex),onCall={dial(p.primary)},onTap={selected=p}) {
+                                        Column { PersonRow(p);if(index!=filtered.lastIndex) HorizontalDivider(Modifier.padding(start=68.dp),thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant) }
+                                    }
+                                }
                             }
-                            Column(Modifier.width(32.dp).verticalScroll(rememberScrollState()),horizontalAlignment=Alignment.CenterHorizontally) {
-                                ("АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯABCDEFGHIJKLMNOPQRSTUVWXYZ#".toList()).forEach { ch->
+                            val alphabet="АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯABCDEFGHIJKLMNOPQRSTUVWXYZ#"
+                            val letters=alphabet.filter { ch->filtered.any { p->if(ch=='#') p.name.firstOrNull()?.isLetter()!=true else p.name.startsWith(ch.toString(),true) } }
+                            Column(Modifier.width(28.dp).padding(top=8.dp).verticalScroll(rememberScrollState()),horizontalAlignment=Alignment.CenterHorizontally) {
+                                letters.forEach { ch->
                                     Text(ch.toString(),fontSize=10.sp,color=MaterialTheme.colorScheme.primary,modifier=Modifier.clickable {
                                         val i=filtered.indexOfFirst { p->if(ch=='#') p.name.firstOrNull()?.isLetter()!=true else p.name.startsWith(ch.toString(),true) }
                                         if(i>=0) scope.launch { state.animateScrollToItem(i) }
-                                    }.padding(vertical=1.dp))
+                                    }.padding(horizontal=4.dp,vertical=3.dp))
                                 }
                             }
                         }
@@ -196,9 +203,9 @@ class MainActivity : ComponentActivity() {
         error?.let { message->AlertDialog(onDismissRequest={error=null},title={Text("Звонилка")},text={Text(message)},confirmButton={TextButton(onClick={error=null}){Text("Понятно")}}) }
     }
     @Composable private fun PersonRow(p:PersonRecord,number:String=p.primary) {
-        Row(Modifier.fillMaxWidth().padding(16.dp),verticalAlignment=Alignment.CenterVertically) {
-            Photo(p,Modifier.size(50.dp).clip(CircleShape));Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) { Text(p.name,style=MaterialTheme.typography.titleMedium);Text(NumberTools.display(number),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+        Row(Modifier.fillMaxWidth().padding(horizontal=14.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
+            Photo(p,Modifier.size(42.dp).clip(CircleShape));Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) { Text(p.name,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis);Spacer(Modifier.height(3.dp));Text(NumberTools.display(number),fontSize=13.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
     @Composable private fun HistoryList(rows:List<HistoryRecord>) {
@@ -209,11 +216,20 @@ class MainActivity : ComponentActivity() {
         var contextCall by remember { mutableStateOf<HistoryRecord?>(null) }
         val visible=if(missedOnly) rows.filter{it.type==CallLog.Calls.MISSED_TYPE} else rows
         LaunchedEffect(rows) { chosen=chosen.intersect(rows.map{it.id}.toSet()) }
+        val zone=java.time.ZoneId.systemDefault()
+        val today=java.time.LocalDate.now(zone)
+        val dates=remember(visible,zone) { visible.map { java.time.Instant.ofEpochMilli(it.date).atZone(zone).toLocalDate() } }
         Column {
             Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) {
-                Row(Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                    FilterChip(selected=!missedOnly,onClick={missedOnly=false},label={Text("Все")})
-                    FilterChip(selected=missedOnly,onClick={missedOnly=true},label={Text("Пропущенные")})
+                Row(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(3.dp),horizontalArrangement=Arrangement.spacedBy(2.dp)) {
+                    listOf("Все","Пропущенные").forEachIndexed { index,label ->
+                        val active=missedOnly==(index==1)
+                        Surface(onClick={missedOnly=index==1},modifier=Modifier.weight(1f),shape=RoundedCornerShape(9.dp),color=if(active) MaterialTheme.colorScheme.surface else Color.Transparent,shadowElevation=if(active) 1.dp else 0.dp) {
+                            Box(Modifier.heightIn(min=40.dp).padding(horizontal=4.dp,vertical=8.dp),contentAlignment=Alignment.Center) {
+                                Text(label,fontSize=13.sp,fontWeight=if(active) FontWeight.Medium else FontWeight.Normal,color=if(active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                 }
                 TextButton(onClick={editMode=!editMode;chosen=emptySet()}){Text(if(editMode) "Готово" else "Править")}
             }
@@ -221,15 +237,22 @@ class MainActivity : ComponentActivity() {
                 TextButton(onClick={chosen=visible.map{it.id}.toSet()}){Text("Выбрать все")}
                 TextButton(enabled=chosen.isNotEmpty() && !loading,onClick={confirmDelete(chosen.toSet())}){Text("Удалить (${chosen.size})",color=MaterialTheme.colorScheme.error)}
             }
-            LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(horizontal=16.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(1.dp)) {
+            LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(horizontal=16.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
                 if(visible.isEmpty()) item { EmptySection(if(missedOnly) "Нет пропущенных" else "Пока ни одного вызова","Здесь будет ваша история звонков") }
-                items(visible,key={it.id}) { h->
+                itemsIndexed(visible,key={_,h->h.id}) { index,h->
+                    val day=dates[index]
+                    val first=index==0 || dates[index-1]!=day
+                    val last=index==visible.lastIndex || dates[index+1]!=day
+                    val dayLabel=when(day) { today->"Сегодня";today.minusDays(1)->"Вчера";else->day.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy",Locale("ru"))) }
+                    Column {
+                    if(first) Text(dayLabel,Modifier.padding(start=14.dp,top=18.dp,bottom=8.dp),fontSize=13.sp,fontWeight=FontWeight.Medium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     val p=people.firstOrNull { it.numbers.any { n->NumberTools.key(n)==NumberTools.key(h.number) } }
                     val color=historyColor(h.type)
                     val kind=when(h.type) { CallLog.Calls.MISSED_TYPE->"Пропущенный";CallLog.Calls.OUTGOING_TYPE->"Исходящий";CallLog.Calls.REJECTED_TYPE->"Отклонённый";else->"Входящий" }
                     fun selectRow() { chosen=if(h.id in chosen) chosen-h.id else chosen+h.id }
-                    SwipeCall(enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h}) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=10.dp)) {
+                    SwipeCall(shape=listRowShape(first,last),enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h}) {
+                        Column(Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=12.dp)) {
                             Row(verticalAlignment=Alignment.CenterVertically) {
                                 if(editMode) Checkbox(checked=h.id in chosen,onCheckedChange={selectRow()})
                                 Photo(p,Modifier.size(44.dp).clip(CircleShape))
@@ -240,9 +263,9 @@ class MainActivity : ComponentActivity() {
                                         Icon(if(h.type==CallLog.Calls.OUTGOING_TYPE) Icons.Default.CallMade else if(h.type==CallLog.Calls.MISSED_TYPE) Icons.Default.CallMissed else Icons.Default.CallReceived,null,Modifier.size(14.dp),tint=color)
                                         Spacer(Modifier.width(4.dp));Text(simLabel(h.accountId)+" · "+NumberTools.duration(h.seconds),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
-                                    Text(SimpleDateFormat("dd.MM · HH:mm",Locale.getDefault()).format(h.date),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                IconButton(onClick={expanded=if(expanded==h.id) null else h.id}){Icon(Icons.Default.Info,"Сведения о вызове",tint=MaterialTheme.colorScheme.primary,modifier=Modifier.size(22.dp))}
+                                Text(SimpleDateFormat("HH:mm",Locale.getDefault()).format(h.date),Modifier.padding(start=8.dp),fontSize=12.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                IconButton(onClick={expanded=if(expanded==h.id) null else h.id}){Icon(Icons.Outlined.Info,"Сведения о вызове",tint=MaterialTheme.colorScheme.primary,modifier=Modifier.size(22.dp))}
                             }
                             if(expanded==h.id) {
                                 HorizontalDivider(Modifier.padding(vertical=10.dp),color=MaterialTheme.colorScheme.outlineVariant)
@@ -255,6 +278,9 @@ class MainActivity : ComponentActivity() {
                                 TextButton(enabled=!loading,onClick={confirmDelete(setOf(h.id))}) { Icon(Icons.Default.Delete,null,Modifier.size(18.dp),tint=MaterialTheme.colorScheme.error);Spacer(Modifier.width(6.dp));Text("Удалить вызов",color=MaterialTheme.colorScheme.error) }
                             }
                         }
+                        if(!last) HorizontalDivider(Modifier.padding(start=68.dp),thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant)
+                        }
+                    }
                     }
                 }
             }

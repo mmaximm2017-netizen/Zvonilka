@@ -50,7 +50,7 @@ val Sky=Color(0xFFE8F3FF)
         typography=Typography(
             headlineMedium=androidx.compose.ui.text.TextStyle(fontWeight=FontWeight.Bold,fontSize=28.sp,lineHeight=34.sp),
             titleLarge=androidx.compose.ui.text.TextStyle(fontWeight=FontWeight.Bold,fontSize=22.sp,lineHeight=28.sp),
-            titleMedium=androidx.compose.ui.text.TextStyle(fontWeight=FontWeight.SemiBold,fontSize=16.sp,lineHeight=22.sp),
+            titleMedium=androidx.compose.ui.text.TextStyle(fontWeight=FontWeight.Medium,fontSize=16.sp,lineHeight=22.sp),
             bodyMedium=androidx.compose.ui.text.TextStyle(fontSize=14.sp,lineHeight=20.sp),
             labelLarge=androidx.compose.ui.text.TextStyle(fontWeight=FontWeight.SemiBold,fontSize=14.sp,lineHeight=20.sp)
         ),content=content)
@@ -60,6 +60,9 @@ val Sky=Color(0xFFE8F3FF)
     android.provider.CallLog.Calls.OUTGOING_TYPE -> if(isSystemInDarkTheme()) Color(0xFF7BDAAE) else Color(0xFF187544)
     else -> MaterialTheme.colorScheme.primary
 }
+fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
+    topStart=if(first) 20.dp else 0.dp,topEnd=if(first) 20.dp else 0.dp,
+    bottomStart=if(last) 20.dp else 0.dp,bottomEnd=if(last) 20.dp else 0.dp)
 @Composable fun SectionLabel(text:String) {
     Text(text,Modifier.padding(start=4.dp,top=12.dp,bottom=6.dp),style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
 }
@@ -94,12 +97,15 @@ val Sky=Color(0xFFE8F3FF)
     }
 }
 @OptIn(ExperimentalFoundationApi::class)
-@Composable fun SwipeCall(modifier:Modifier=Modifier,onCall:()->Unit,onTap:()->Unit,onLong:()->Unit={},enabled:Boolean=true,content:@Composable ()->Unit) {
+@Composable fun SwipeCall(modifier:Modifier=Modifier,onCall:()->Unit,onTap:()->Unit,onLong:()->Unit={},enabled:Boolean=true,shape:androidx.compose.ui.graphics.Shape=RoundedCornerShape(20.dp),content:@Composable ()->Unit) {
     val offset=remember { Animatable(0f) }; val scope=rememberCoroutineScope(); var width by remember { mutableIntStateOf(1) }
     val view=LocalView.current
     val call by rememberUpdatedState(onCall)
-    Box(modifier.clip(RoundedCornerShape(20.dp)).background(Ocean).onSizeChanged { width=it.width }) {
-        Icon(Icons.Default.Call,"Позвонить",Modifier.align(Alignment.CenterStart).padding(24.dp),tint=Color.White)
+    Box(modifier.clip(shape).onSizeChanged { width=it.width }) {
+        // The action background must follow content size, never impose its own height.
+        Box(Modifier.matchParentSize().background(if(offset.value>0f) Ocean else MaterialTheme.colorScheme.surface)) {
+            if(offset.value>0f) Icon(Icons.Default.Call,null,Modifier.align(Alignment.CenterStart).padding(start=24.dp),tint=Color.White)
+        }
         Box(Modifier.offset { IntOffset(offset.value.toInt(),0) }.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
             .pointerInput(width,enabled) {
                 if(!enabled) return@pointerInput
