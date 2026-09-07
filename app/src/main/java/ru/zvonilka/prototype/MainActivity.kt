@@ -35,7 +35,7 @@ class MainActivity : Activity() {
             setTextColor(Color.LTGRAY)
         }, LinearLayout.LayoutParams(-1, 0, 1f))
         number = EditText(this).apply {
-            id = 1001
+    id = android.view.View.generateViewId()
             inputType = android.text.InputType.TYPE_CLASS_PHONE
             showSoftInputOnFocus = false
             textSize = 30f
