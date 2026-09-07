@@ -105,7 +105,10 @@ class CallActivity : Activity() {
         }
         if (call.state == Call.STATE_SELECT_PHONE_ACCOUNT) {
             @Suppress("DEPRECATION")
-            val accounts = call.details.intentExtras?.getParcelableArrayList<PhoneAccountHandle>(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLES).orEmpty()
+            val suggestions = call.details.extras?.getParcelableArrayList<android.telecom.PhoneAccountSuggestion>(Call.EXTRA_SUGGESTED_PHONE_ACCOUNTS)
+            @Suppress("DEPRECATION")
+            val accounts = suggestions?.map { it.phoneAccountHandle }
+                ?: call.details.extras?.getParcelableArrayList<PhoneAccountHandle>(Call.AVAILABLE_PHONE_ACCOUNTS).orEmpty()
             val telecom = getSystemService(TelecomManager::class.java)
             accounts.forEachIndexed { index, account ->
                 val name = telecom.getPhoneAccount(account)?.label ?: "SIM ${index + 1}"
