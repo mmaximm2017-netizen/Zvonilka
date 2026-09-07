@@ -26,16 +26,17 @@ import kotlin.math.roundToInt
     val action by rememberUpdatedState(onComplete)
     var offset by remember{mutableFloatStateOf(0f)}
     var busy by remember{mutableStateOf(false)}
-    BoxWithConstraints(Modifier.fillMaxWidth().height(72.dp).clip(CircleShape).background(color.copy(alpha=.3f)).semantics {
+    BoxWithConstraints(Modifier.fillMaxWidth().height(72.dp).clip(CircleShape).background(Color.White.copy(alpha=.18f)).border(1.dp,Color.White.copy(alpha=.12f),CircleShape).semantics {
         contentDescription=label+". Передвиньте ползунок вправо"
         customActions=listOf(CustomAccessibilityAction(label){if(!busy){action();true}else false})
     }) {
         val thumbPx=with(LocalDensity.current){64.dp.toPx()}
+        val startSlop=with(LocalDensity.current){16.dp.toPx()}
         val travel=(constraints.maxWidth-thumbPx-with(LocalDensity.current){8.dp.toPx()}).coerceAtLeast(1f)
-        Text("$label  →",Modifier.align(Alignment.Center),color=Color.White,fontSize=18.sp)
+        Text(label,Modifier.align(Alignment.Center).padding(start=44.dp),color=Color.White.copy(alpha=(1f-offset/travel).coerceIn(0f,1f)),fontSize=20.sp)
         Box(Modifier.fillMaxSize().pointerInput(travel){
             var accepted=false
-            detectHorizontalDragGestures(onDragStart={p->accepted=!busy && p.x<=thumbPx+16},onDragEnd={
+            detectHorizontalDragGestures(onDragStart={p->accepted=!busy && p.x<=thumbPx+startSlop},onDragEnd={
                 if(accepted) {
                     busy=true
                     scope.launch {
