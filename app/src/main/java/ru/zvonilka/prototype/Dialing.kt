@@ -25,7 +25,7 @@ object Dialing {
     fun remember(c:Context,number:String,a:PhoneAccountHandle) { prefs(c).edit().putString("sim_${personKey(number)}",accountKey(a)).apply() }
     fun choose(activity:Activity,number:String?,done:()->Unit) {
         val list=accounts(activity)
-        if(list.isEmpty()) { android.widget.Toast.makeText(activity,"Нет доступных SIM. Проверьте разрешение «Телефон».",1).show();return }
+        if(list.isEmpty()) { android.widget.Toast.makeText(activity,"Нет доступных SIM. Проверьте разрешение «Телефон».",android.widget.Toast.LENGTH_LONG).show();return }
         AlertDialog.Builder(activity).setTitle(if(number==null) "SIM по умолчанию" else "SIM для этого контакта")
             .setItems(list.map { label(activity,it) }.toTypedArray()) { _,i ->
                 if(number==null) prefs(activity).edit().putString("default_sim",accountKey(list[i])).apply()
@@ -45,7 +45,7 @@ object Dialing {
                 val extras=Bundle()
                 if(account!=null) extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE,account)
                 telecom.placeCall(Uri.fromParts("tel",NumberTools.clean(number),null),extras)
-            } catch (_:RuntimeException) { android.widget.Toast.makeText(activity,"Не удалось начать вызов. Проверьте SIM и разрешения.",1).show() }
+            } catch (_:RuntimeException) { android.widget.Toast.makeText(activity,"Не удалось начать вызов. Проверьте SIM и разрешения.",android.widget.Toast.LENGTH_LONG).show() }
         }
         if(wanted!=null && selected==null && list.isNotEmpty()) AlertDialog.Builder(activity)
             .setTitle("Выбранная SIM недоступна").setMessage("Позвонить через ${label(activity,list.first())}?")
