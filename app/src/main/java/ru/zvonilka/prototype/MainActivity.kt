@@ -35,6 +35,10 @@ import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.Locale
 
+private object HistoryCache {
+    @Volatile var items:List<HistoryRecord> = emptyList()
+}
+
 class MainActivity : ComponentActivity() {
     override fun attachBaseContext(base: Context) { super.attachBaseContext(ThemeSettings.wrap(base)) }
     private var pendingDelete=emptySet<Long>()
@@ -58,7 +62,7 @@ class MainActivity : ComponentActivity() {
     }
     private val data by lazy { PhoneData(this) }
     private var people by mutableStateOf(emptyList<PersonRecord>())
-    private var history by mutableStateOf(emptyList<HistoryRecord>())
+    private var history by mutableStateOf(HistoryCache.items)
     private var error by mutableStateOf<String?>(null)
     private var loading by mutableStateOf(false)
     private var tab by mutableIntStateOf(0)
@@ -124,12 +128,16 @@ class MainActivity : ComponentActivity() {
     override fun onResume() { super.onResume();callScreenIssue=CallScreenAccess.issue(this);refresh() }
     private fun refresh() {
         lifecycleScope.launch {
-            loading=true
-            runCatching { withContext(Dispatchers.IO) { data.contacts() to data.history() } }
-                .onSuccess { (p,h)-> people=p;simStatus=data.sim.status;ContactCache.people=p;history=h;selected=selected?.let { old->p.find { it.id==old.id } } }
-                .onFailure { error="Не удалось загрузить данные: ${it.message}" }
-            loading=false
-            if(tab==0) MissedCalls.clear(this@MainActivity)
+            val historyLoad=async(Dispatchers.IO) { runCatching { data.history() } }
+            val contactsLoad=async(Dispatchers.IO) { runCatching { data.contacts() } }
+
+            historyLoad.await()
+                .onSuccess { h-> history=h;HistoryCache.items=h;if(tab==0) MissedCalls.clear(this@MainActivity) }
+                .onFailure { error="Не удалось загрузить журнал: ${it.message}" }
+
+            contactsLoad.await()
+                .onSuccess { p-> people=p;simStatus=data.sim.status;ContactCache.people=p;selected=selected?.let { old->p.find { it.id==old.id } } }
+                .onFailure { error="Не удалось загрузить контакты: ${it.message}" }
         }
     }
     private fun work(action:()->Unit) {

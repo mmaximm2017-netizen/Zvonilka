@@ -11,8 +11,8 @@ android {
         applicationId = "ru.zvonilka.prototype"
         minSdk = 29
         targetSdk = 35
-        versionCode = 22
-        versionName = "0.11.4"
+        versionCode = 23
+        versionName = "0.11.5"
     }
     buildFeatures {
         compose = true
