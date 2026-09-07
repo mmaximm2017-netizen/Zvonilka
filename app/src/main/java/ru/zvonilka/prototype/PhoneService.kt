@@ -36,7 +36,21 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         super.onCreate()
         CallDiagnostics.record(this, "service_create")
         CallStore.service = this
-        io.execute { runCatching { PhoneData(this).contacts() }.onSuccess { ContactCache.people=it;contactsReady=true;handler.post { CallStore.changed() } } }
+        io.execute {
+            runCatching { PhoneData(this).contacts() }.onSuccess { people ->
+                ContactCache.people=people
+                contactsReady=true
+                handler.post {
+                    // An incoming call can arrive before the asynchronous contacts query finishes.
+                    // Rebuild every still-live call notification so Android CallStyle receives the contact name,
+                    // instead of leaving the initial number-only heads-up notification on screen.
+                    CallStore.calls.toMap().forEach { (key, call) ->
+                        if (call.state != Call.STATE_DISCONNECTED) refresh(call, key)
+                    }
+                    CallStore.changed()
+                }
+            }
+        }
         // Telecom plays the ringtone: do not declare IN_CALL_SERVICE_RINGING.
         manager.createNotificationChannel(NotificationChannel("calls", "Входящие вызовы", NotificationManager.IMPORTANCE_HIGH).apply {
             setSound(null, null)
@@ -104,9 +118,10 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
             else PendingIntent.getBroadcast(this, id,
             Intent(this, CallActionReceiver::class.java).setAction(name).putExtra("call_id", key),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val displayName = ContactCache.find(CallStore.label(call))?.name ?: CallStore.label(call)
         val builder = Notification.Builder(this, if (ringing) "calls" else "ongoing")
             .setSmallIcon(android.R.drawable.sym_action_call)
-            .setContentTitle(ContactCache.find(CallStore.label(call))?.name ?: CallStore.label(call)).setContentText(CallerId.text(this,key)?.let { CallStore.state(call)+" · "+it } ?: CallStore.state(call))
+            .setContentTitle(displayName).setContentText(CallerId.text(this,key)?.let { CallStore.state(call)+" · "+it } ?: CallStore.state(call))
             .setCategory(Notification.CATEGORY_CALL).setOngoing(true).setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(open)
             .setPublicVersion(Notification.Builder(this,if(ringing) "calls" else "ongoing")
@@ -115,7 +130,7 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
                 .setCategory(Notification.CATEGORY_CALL).setContentIntent(open).build())
         if (ringing) builder.setFullScreenIntent(open, true)
         if (Build.VERSION.SDK_INT >= 31) {
-            val person = Person.Builder().setName(ContactCache.find(CallStore.label(call))?.name ?: CallStore.label(call)).setImportant(true).build()
+            val person = Person.Builder().setName(displayName).setImportant(true).build()
             builder.setStyle(if (ringing) Notification.CallStyle.forIncomingCall(person, action("reject"), action("answer"))
                 else Notification.CallStyle.forOngoingCall(person, action("hangup")))
         } else {
@@ -205,7 +220,6 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         }
     }
     // Android documents ROLE_DIALER as an alternative to privileged MODIFY_PHONE_STATE.
-    // Lint models only the privileged permission; enforce the documented role at runtime.
     @android.annotation.SuppressLint("MissingPermission")
     private fun silenceForDialerRole() {
         val telecom=getSystemService(TelecomManager::class.java)
