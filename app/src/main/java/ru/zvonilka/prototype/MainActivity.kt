@@ -268,10 +268,10 @@ class MainActivity : ComponentActivity() {
     @Composable private fun SimBadge(p:PersonRecord) {
         if(p.simSources.isEmpty()) return
         val label=p.simSources.map{it.book.label}.distinct().joinToString()
-        Surface(shape=RoundedCornerShape(6.dp),color=MaterialTheme.colorScheme.primaryContainer.copy(alpha=.65f)) {
-            Row(Modifier.padding(horizontal=5.dp,vertical=1.dp),verticalAlignment=Alignment.CenterVertically) {
-                Icon(Icons.Default.SimCard,null,Modifier.size(10.dp),tint=MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(2.dp));Text(label,fontSize=9.sp,color=MaterialTheme.colorScheme.primary,maxLines=1)
+        Surface(shape=RoundedCornerShape(5.dp),color=MaterialTheme.colorScheme.primaryContainer.copy(alpha=.28f)) {
+            Row(Modifier.padding(horizontal=4.dp,vertical=1.dp),verticalAlignment=Alignment.CenterVertically) {
+                Icon(Icons.Default.SimCard,null,Modifier.size(9.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(2.dp));Text(label,fontSize=8.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
             }
         }
     }
@@ -331,7 +331,7 @@ class MainActivity : ComponentActivity() {
                     val color=historyColor(h.type)
                     val kind=when(h.type) { CallLog.Calls.MISSED_TYPE->"Пропущенный";CallLog.Calls.OUTGOING_TYPE->"Исходящий";CallLog.Calls.REJECTED_TYPE->"Отклонённый";else->"Входящий" }
                     fun selectRow() { chosen=if(h.id in chosen) chosen-h.id else chosen+h.id }
-                    SwipeCall(shape=RoundedCornerShape(0.dp),enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h}) {
+                    SwipeCall(shape=RoundedCornerShape(0.dp),containerColor=MaterialTheme.colorScheme.background,enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h}) {
                         Column(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(horizontal=10.dp,vertical=9.dp)) {
                             Row(verticalAlignment=Alignment.CenterVertically) {
@@ -401,7 +401,7 @@ class MainActivity : ComponentActivity() {
                         .setItems(people.map { it.name }.toTypedArray()) { _,i->editor(people[i].copy(numbers=people[i].numbers+number)) }.show()
                 }) { Text("Добавить к существующему") }
             }
-            Spacer(Modifier.height(44.dp))
+            Spacer(Modifier.height(18.dp))
             listOf("123","456","789","*0#").forEach { line->Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
                 line.forEach { digit->
                     Surface(Modifier.padding(vertical=3.dp).size(68.dp).combinedClickable(onClick={
@@ -535,8 +535,8 @@ class MainActivity : ComponentActivity() {
                     Column(Modifier.weight(1f)) { Text("PhoneBlock",style=MaterialTheme.typography.bodyLarge);Text("Бесплатная проверка неизвестных номеров на спам",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
                     Switch(callerId,{ enabled -> callerId=enabled;CallerId.setEnabled(this@MainActivity,enabled) })
                 }
-                Text("При включении неизвестный входящий номер передаётся PhoneBlock через интернет. Контакты и журнал не загружаются; звонки не блокируются.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick={startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://phoneblock.net/phoneblock/")))}) { Text("О сервисе PhoneBlock") }
+                Text("Неизвестный номер проверяется через PhoneBlock. Контакты и журнал не передаются; звонки не блокируются.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick={startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://phoneblock.net/phoneblock/")))},contentPadding=PaddingValues(horizontal=10.dp,vertical=2.dp)) { Text("О сервисе PhoneBlock",fontSize=12.sp) }
             }
             SectionLabel("ДОПОЛНИТЕЛЬНО")
             SettingsGroup {

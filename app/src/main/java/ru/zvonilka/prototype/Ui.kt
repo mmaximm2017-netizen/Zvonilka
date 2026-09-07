@@ -65,7 +65,7 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
     topStart=if(first) 20.dp else 0.dp,topEnd=if(first) 20.dp else 0.dp,
     bottomStart=if(last) 20.dp else 0.dp,bottomEnd=if(last) 20.dp else 0.dp)
 @Composable fun SectionLabel(text:String) {
-    Text(text,Modifier.padding(start=4.dp,top=12.dp,bottom=6.dp),style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(text,Modifier.padding(start=4.dp,top=10.dp,bottom=4.dp),style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
 }
 @Composable fun EmptySection(title:String,subtitle:String) {
     Column(Modifier.fillMaxWidth().padding(horizontal=24.dp,vertical=56.dp),horizontalAlignment=Alignment.CenterHorizontally) {
@@ -76,7 +76,7 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
 }
 @Composable fun SettingsGroup(content:@Composable ColumnScope.()->Unit) {
     Surface(shape=RoundedCornerShape(24.dp),color=MaterialTheme.colorScheme.surface,modifier=Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(12.dp),content=content)
+        Column(Modifier.padding(15.dp),verticalArrangement=Arrangement.spacedBy(8.dp),content=content)
     }
 }
 @Composable fun Photo(person:PersonRecord?,modifier:Modifier=Modifier,full:Boolean=false) {
@@ -99,16 +99,16 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
     }
 }
 @OptIn(ExperimentalFoundationApi::class)
-@Composable fun SwipeCall(modifier:Modifier=Modifier,onCall:()->Unit,onTap:()->Unit,onLong:()->Unit={},enabled:Boolean=true,shape:androidx.compose.ui.graphics.Shape=RoundedCornerShape(20.dp),content:@Composable ()->Unit) {
+@Composable fun SwipeCall(modifier:Modifier=Modifier,onCall:()->Unit,onTap:()->Unit,onLong:()->Unit={},enabled:Boolean=true,shape:androidx.compose.ui.graphics.Shape=RoundedCornerShape(20.dp),containerColor:Color=MaterialTheme.colorScheme.surface,content:@Composable ()->Unit) {
     val offset=remember { Animatable(0f) }; val scope=rememberCoroutineScope(); var width by remember { mutableIntStateOf(1) }
     val view=LocalView.current
     val call by rememberUpdatedState(onCall)
     Box(modifier.clip(shape).onSizeChanged { width=it.width }) {
         // The action background must follow content size, never impose its own height.
-        Box(Modifier.matchParentSize().background(if(offset.value>0f) Ocean else MaterialTheme.colorScheme.surface)) {
+        Box(Modifier.matchParentSize().background(if(offset.value>0f) Ocean else containerColor)) {
             if(offset.value>0f) Icon(Icons.Default.Call,null,Modifier.align(Alignment.CenterStart).padding(start=24.dp),tint=Color.White)
         }
-        Box(Modifier.offset { IntOffset(offset.value.toInt(),0) }.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+        Box(Modifier.offset { IntOffset(offset.value.toInt(),0) }.fillMaxWidth().background(containerColor)
             .pointerInput(width,enabled) {
                 if(!enabled) return@pointerInput
                 detectHorizontalDragGestures(onDragEnd={
