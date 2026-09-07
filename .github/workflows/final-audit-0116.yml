@@ -27,7 +27,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app/src/main/java/ru/zvonilka/prototype/MainActivity.kt app/src/main/java/ru/zvonilka/prototype/PhoneData.kt app/src/main/java/ru/zvonilka/prototype/PhoneService.kt app/build.gradle.kts .github/workflows/build.yml README.md
+          git add app/src/main/java/ru/zvonilka/prototype/MainActivity.kt app/src/main/java/ru/zvonilka/prototype/PhoneData.kt app/src/main/java/ru/zvonilka/prototype/PhoneService.kt app/build.gradle.kts README.md
           if ! git diff --cached --quiet; then
             git commit -m 'Fix final audit findings and build release APK'
             git push origin HEAD:fix/final-audit-0.11.6
