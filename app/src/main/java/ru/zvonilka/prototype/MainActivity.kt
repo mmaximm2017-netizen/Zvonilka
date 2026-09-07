@@ -292,7 +292,7 @@ class MainActivity : ComponentActivity() {
     @Composable private fun Settings() {
         var haptic by remember { mutableStateOf(getSharedPreferences("settings",0).getBoolean("haptic",true)) }
         Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text("Звонилка 0.3.1",style=MaterialTheme.typography.headlineMedium)
+            Text("Звонилка 0.3.2",style=MaterialTheme.typography.headlineMedium)
             Text("Тема: как в системе")
             Row(verticalAlignment=Alignment.CenterVertically) { Text("Вибрация клавиш",Modifier.weight(1f));Switch(haptic,{haptic=it;getSharedPreferences("settings",0).edit().putBoolean("haptic",it).apply()}) }
             Button(onClick={setup()}) { Text("Настроить разрешения") }

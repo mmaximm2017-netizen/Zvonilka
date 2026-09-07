@@ -89,6 +89,23 @@ class PhoneData(private val context: Context) {
         val ops=ArrayList(ids.map { ContentProviderOperation.newDelete(ContentUris.withAppendedId(CallLog.Calls.CONTENT_URI,it)).build() })
         if(ops.isNotEmpty()) cr.applyBatch(CallLog.AUTHORITY,ops)
     }
+    // Read the display photo of this local raw contact, never an aggregated cloud photo.
+    // Called on Dispatchers.IO only, and only for a large photo surface.
+    fun displayPhoto(id: Long): android.graphics.Bitmap? {
+        if(id < 0 || !allowed(android.Manifest.permission.READ_CONTACTS)) return null
+        return try {
+            requireLocal(id)
+            val uri=Uri.withAppendedPath(ContentUris.withAppendedId(CC.RawContacts.CONTENT_URI,id),CC.RawContacts.DisplayPhoto.CONTENT_DIRECTORY)
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr,uri)) { decoder, info, _ ->
+                val scale=minOf(1f,2048f/maxOf(info.size.width,info.size.height))
+                decoder.setTargetSize((info.size.width*scale).toInt().coerceAtLeast(1),(info.size.height*scale).toInt().coerceAtLeast(1))
+                decoder.allocator=ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+        } catch (_: java.io.IOException) { null }
+          catch (_: SecurityException) { null }
+          catch (_: IllegalArgumentException) { null }
+          catch (_: IllegalStateException) { null }
+    }
     fun photo(uri:Uri):ByteArray {
         val bitmap=ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr,uri)) { decoder, info, _ ->
             val scale=minOf(1f,1200f/maxOf(info.size.width,info.size.height))

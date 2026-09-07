@@ -21,6 +21,11 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.FilterQuality
 
 val Green=Color(0xFF28AC67)
 val Red=Color(0xFFE34E59)
@@ -29,9 +34,20 @@ val Blue=Color(0xFF3987DF)
     MaterialTheme(colorScheme=if(isSystemInDarkTheme()) darkColorScheme(primary=Green,background=Color(0xFF101114),surface=Color(0xFF191B20)) else lightColorScheme(primary=Color(0xFF16884B),background=Color(0xFFF6F7FA),surface=Color.White),content=content)
 }
 @Composable fun Photo(person:PersonRecord?,modifier:Modifier=Modifier,full:Boolean=false) {
-    val bitmap=remember(person?.id,person?.photo) { person?.photo?.let { BitmapFactory.decodeByteArray(it,0,it.size)?.asImageBitmap() } }
+    val thumbnail=remember(person?.id,person?.photo) { person?.photo?.let { BitmapFactory.decodeByteArray(it,0,it.size)?.asImageBitmap() } }
+    val context=LocalContext.current.applicationContext
+    // Key the state as well as the coroutine so a different caller never sees the old photo.
+    val large = key(person?.id,person?.photo,full) {
+        val loaded by produceState<ImageBitmap?>(initialValue=null) {
+            if(full && person!=null) value=withContext(Dispatchers.IO) {
+                PhoneData(context).displayPhoto(person.id)?.asImageBitmap()
+            }
+        }
+        loaded
+    }
+    val bitmap=large ?: thumbnail
     Box(modifier.background(Color(0xFF435968)),contentAlignment=Alignment.Center) {
-        if(bitmap!=null) Image(bitmap,null,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
+        if(bitmap!=null) Image(bitmap,null,Modifier.fillMaxSize(),contentScale=ContentScale.Crop,filterQuality=FilterQuality.High)
         else Text(NumberTools.initials(person?.name ?: "?"),fontSize=if(full) 72.sp else 19.sp,color=Color.White)
     }
 }
