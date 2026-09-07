@@ -1,0 +1,34 @@
+name: Final audit remediation 0.11.6
+on:
+  push:
+    branches: [fix/final-audit-0.11.6]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/final-audit-0.11.6
+      - name: Apply audit fixes
+        run: python final_audit_0116.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Test release build and lint
+        run: gradle :app:testDebugUnitTest :app:assembleRelease :app:lintRelease --no-daemon
+      - name: Commit implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/ru/zvonilka/prototype/MainActivity.kt app/src/main/java/ru/zvonilka/prototype/PhoneData.kt app/src/main/java/ru/zvonilka/prototype/PhoneService.kt app/build.gradle.kts .github/workflows/build.yml README.md
+          if ! git diff --cached --quiet; then
+            git commit -m 'Fix final audit findings and build release APK'
+            git push origin HEAD:fix/final-audit-0.11.6
+          fi
