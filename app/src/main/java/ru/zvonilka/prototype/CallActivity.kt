@@ -29,6 +29,7 @@ class CallActivity : ComponentActivity() {
     private val listener:()->Unit={revision++}
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState);setShowWhenLocked(true);setTurnScreenOn(true)
+        CallDiagnostics.record(this, "screen_created")
         selected=savedInstanceState?.getString("selected") ?: intent.getStringExtra("call_id")
         val power=getSystemService(PowerManager::class.java)
         if(power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) proximity=power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,"Zvonilka:proximity")
@@ -37,7 +38,7 @@ class CallActivity : ComponentActivity() {
     }
     override fun onNewIntent(intent:Intent) { super.onNewIntent(intent);setIntent(intent);selected=intent.getStringExtra("call_id") ?: selected;handleAnswer(intent);revision++ }
     private fun handleAnswer(intent:Intent) { if(intent.action=="answer") CallStore.calls[intent.getStringExtra("call_id")]?.takeIf{it.state==Call.STATE_RINGING}?.answer(VideoProfile.STATE_AUDIO_ONLY) }
-    override fun onStart() { super.onStart();CallStore.listeners.add(listener);revision++ }
+    override fun onStart() { super.onStart();CallDiagnostics.record(this,"screen_started");CallStore.listeners.add(listener);revision++ }
     override fun onStop() { CallStore.listeners.remove(listener);stopTone();releaseProximity();super.onStop() }
     override fun onSaveInstanceState(outState:Bundle) {outState.putString("selected",selected);super.onSaveInstanceState(outState)}
     private fun stopTone(){toneCall?.stopDtmfTone();toneCall=null}

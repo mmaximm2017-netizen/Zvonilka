@@ -33,6 +33,7 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
 
     override fun onCreate() {
         super.onCreate()
+        CallDiagnostics.record(this, "service_create")
         CallStore.service = this
         io.execute { runCatching { PhoneData(this).contacts() }.onSuccess { ContactCache.people=it;handler.post { CallStore.changed() } } }
         // Telecom plays the ringtone: do not declare IN_CALL_SERVICE_RINGING.
@@ -43,10 +44,16 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         manager.createNotificationChannel(NotificationChannel("ongoing", "Текущий разговор", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null) })
     }
 
+    override fun onBind(intent: Intent): android.os.IBinder? {
+        CallDiagnostics.record(this, "service_bind")
+        return super.onBind(intent).also { CallDiagnostics.record(this, "binder_present=${it != null}") }
+    }
+
     override fun onCallAdded(call: Call) {
         super.onCallAdded(call)
         CallStore.service = this
         if (call in callbacks) return
+        CallDiagnostics.record(this, "call_added state=${call.state}")
         val key = CallStore.add(call)
         ids[call] = nextId++
         if(call.state==Call.STATE_RINGING && CallStore.calls.values.count{it.state==Call.STATE_RINGING}==1) {
@@ -70,10 +77,14 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
     private fun refresh(call: Call, key: String) {
         val id = ids[call] ?: return
         if (call.state == Call.STATE_DISCONNECTED) { removeCall(call); return }
-        publishedStates[call] = call.state
+        val previousState = publishedStates.put(call, call.state)
+        if(previousState != call.state) CallDiagnostics.record(this, "call_state=${call.state}")
         val ringing = call.state == Call.STATE_RINGING
         if(call.state==Call.STATE_ACTIVE) call.details.accountHandle?.let { Dialing.remember(this,CallStore.label(call),it) }
         if(CallStore.calls.values.none{it.state==Call.STATE_RINGING}) sensors.unregisterListener(this)
+        // Notification errors must not abort Telecom callbacks or opening the call UI.
+        try {
+        if(previousState != null && (previousState == Call.STATE_RINGING) != ringing) manager.cancel(id)
         val open = PendingIntent.getActivity(this, id, Intent(this, CallActivity::class.java).apply {
             putExtra("call_id", key)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -101,19 +112,28 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         if (Build.VERSION.SDK_INT < 33 || checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             manager.notify(id, builder.build())
         }
+        } catch (error: RuntimeException) {
+            CallDiagnostics.record(this, "notification_error", error)
+        }
         // Notification cleanup/update must not depend on the activity rendering successfully.
         CallStore.changed()
     }
 
     private fun showCall(key: String? = null) {
-        startActivity(Intent(this, CallActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("call_id", key)
-        })
+        CallDiagnostics.record(this, "screen_requested")
+        try {
+            startActivity(Intent(this, CallActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("call_id", key)
+            })
+        } catch (error: RuntimeException) {
+            CallDiagnostics.record(this, "screen_launch_error", error)
+        }
     }
     override fun onBringToForeground(showDialpad: Boolean) = showCall()
     override fun onCallAudioStateChanged(audioState: CallAudioState?) { CallStore.changed() }
     private fun removeCall(call: Call) {
+        if(call in ids) CallDiagnostics.record(this, "call_removed state=${call.state}")
         if(call.details.disconnectCause.code==DisconnectCause.MISSED && seenEnded.add(call)) MissedCalls.add(this,call.details.handle?.schemeSpecificPart.orEmpty())
         ids.remove(call)?.let { manager.cancel(it) }
         publishedStates.remove(call)
@@ -141,6 +161,7 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         CallStore.changed()
     }
     override fun onUnbind(intent: Intent?): Boolean {
+        CallDiagnostics.record(this, "service_unbind")
         clearSession()
         return super.onUnbind(intent)
     }
@@ -166,6 +187,7 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
     }
     override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
     override fun onDestroy() {
+        CallDiagnostics.record(this, "service_destroy")
         clearSession()
         io.shutdown()
         super.onDestroy()

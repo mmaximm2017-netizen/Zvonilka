@@ -44,8 +44,9 @@ object Dialing {
             try {
                 val extras=Bundle()
                 if(account!=null) extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE,account)
+                CallDiagnostics.record(activity, "outgoing_requested")
                 telecom.placeCall(Uri.fromParts("tel",NumberTools.clean(number),null),extras)
-            } catch (_:RuntimeException) { android.widget.Toast.makeText(activity,"Не удалось начать вызов. Проверьте SIM и разрешения.",android.widget.Toast.LENGTH_LONG).show() }
+            } catch (error:RuntimeException) { CallDiagnostics.record(activity,"outgoing_error",error);android.widget.Toast.makeText(activity,"Не удалось начать вызов. Проверьте SIM и разрешения.",android.widget.Toast.LENGTH_LONG).show() }
         }
         if(wanted!=null && selected==null && list.isNotEmpty()) AlertDialog.Builder(activity)
             .setTitle("Выбранная SIM недоступна").setMessage("Позвонить через ${label(activity,list.first())}?")

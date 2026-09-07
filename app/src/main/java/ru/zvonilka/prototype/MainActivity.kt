@@ -292,13 +292,21 @@ class MainActivity : ComponentActivity() {
     @Composable private fun Settings() {
         var haptic by remember { mutableStateOf(getSharedPreferences("settings",0).getBoolean("haptic",true)) }
         Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text("Звонилка 0.3",style=MaterialTheme.typography.headlineMedium)
+            Text("Звонилка 0.3.1",style=MaterialTheme.typography.headlineMedium)
             Text("Тема: как в системе")
             Row(verticalAlignment=Alignment.CenterVertically) { Text("Вибрация клавиш",Modifier.weight(1f));Switch(haptic,{haptic=it;getSharedPreferences("settings",0).edit().putBoolean("haptic",it).apply()}) }
             Button(onClick={setup()}) { Text("Настроить разрешения") }
             Text(if(getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_DIALER)) "Телефон по умолчанию: Звонилка" else "Звонилка не назначена по умолчанию")
             Text("Контакты: "+if(data.allowed(Manifest.permission.READ_CONTACTS)) "разрешены" else "нет доступа")
             Text("История: "+if(data.allowed(Manifest.permission.READ_CALL_LOG)) "разрешена" else "нет доступа")
+            Button(onClick={
+                val report=CallDiagnostics.report(this@MainActivity)
+                android.app.AlertDialog.Builder(this@MainActivity).setTitle("Диагностика звонков")
+                    .setMessage(report).setPositiveButton("Копировать") { _,_->
+                        getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("Звонилка: диагностика",report))
+                        toast("Диагностика скопирована")
+                    }.setNegativeButton("Закрыть",null).show()
+            }) { Text("Диагностика звонков") }
             Button(onClick={Dialing.choose(this@MainActivity,null){simRevision++}}) { Text("SIM по умолчанию") }
             Button(onClick={export.launch("Zvonilka-contacts.vcf")},enabled=people.isNotEmpty()) { Text("Экспорт контактов в VCF") }
             Button(onClick={importFile.launch(arrayOf("text/*","application/octet-stream"))},enabled=data.allowed(Manifest.permission.WRITE_CONTACTS)) { Text("Импорт VCF") }
