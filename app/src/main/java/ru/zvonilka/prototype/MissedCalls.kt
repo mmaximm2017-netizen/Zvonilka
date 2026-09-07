@@ -69,7 +69,7 @@ object MissedCalls {
             } catch(e:RuntimeException){CallDiagnostics.record(app,"missed_read_flags_error",e)}
         }
     }
-    private fun markAllSystemRead(c:Context) {
+    private fun markAllSystemRead(c:Context,cutoff:Long) {
         val app=c.applicationContext
         io.execute {
             if(app.getSystemService(TelecomManager::class.java).defaultDialerPackage!=app.packageName)return@execute
@@ -77,14 +77,20 @@ object MissedCalls {
             try {
                 val values=ContentValues().apply{put(CallLog.Calls.NEW,0);put(CallLog.Calls.IS_READ,1)}
                 app.contentResolver.update(CallLog.Calls.CONTENT_URI,values,
-                    "${CallLog.Calls.TYPE}=? AND (${CallLog.Calls.NEW}=1 OR ${CallLog.Calls.IS_READ}=0)",
-                    arrayOf(CallLog.Calls.MISSED_TYPE.toString()))
+                    "${CallLog.Calls.TYPE}=? AND ${CallLog.Calls.DATE}<=? AND (${CallLog.Calls.NEW}=1 OR ${CallLog.Calls.IS_READ}=0)",
+                    arrayOf(CallLog.Calls.MISSED_TYPE.toString(),cutoff.toString()))
             } catch(e:RuntimeException){CallDiagnostics.record(app,"missed_mark_all_read_error",e)}
         }
     }
+    fun clearSystemForUserAction(c:Context,number:String) {
+        val cutoff=System.currentTimeMillis()
+        clearSystem(c,number)
+        if(number.isBlank()) markAllSystemRead(c,cutoff)
+    }
     fun clear(c:Context) {
+        val cutoff=System.currentTimeMillis()
         clearSystem(c)
-        markAllSystemRead(c)
+        markAllSystemRead(c,cutoff)
         val m=c.getSystemService(NotificationManager::class.java)
         m.activeNotifications.filter { it.notification.channelId=="missed" }.forEach { m.cancel(it.tag,it.id) }
         c.getSharedPreferences("missed",0).edit().clear().apply()
@@ -95,14 +101,11 @@ class MissedReceiver:BroadcastReceiver() {
         val number=i.getStringExtra("number").orEmpty();val key=NumberTools.key(number).ifBlank{"hidden"}
         c.getSystemService(NotificationManager::class.java).cancel("missed:$key",1)
         c.getSharedPreferences("missed",0).edit().remove(key).apply()
-        clearForUserAction(c,number)
+        MissedCalls.clearSystemForUserAction(c,number)
         if(i.action=="callback" && number.isNotBlank() && c.checkSelfPermission(android.Manifest.permission.CALL_PHONE)==android.content.pm.PackageManager.PERMISSION_GRANTED) {
             val telecom=c.getSystemService(TelecomManager::class.java)
             if(telecom.defaultDialerPackage==c.packageName) telecom.placeCall(Uri.fromParts("tel",number,null),android.os.Bundle())
         }
-    }
-    private fun clearForUserAction(c:Context,number:String) {
-        if(number.isBlank()) MissedCalls.clearSystem(c) else MissedCalls.clearSystem(c,number)
     }
 }
 

@@ -18,7 +18,7 @@ object CallDiagnostics {
         }
     }
     fun report(c: Context): String = buildString {
-        appendLine("Звонилка 0.10.1 · Android ${android.os.Build.VERSION.SDK_INT} · ${android.os.Build.MODEL}")
+        appendLine("Звонилка ${BuildConfig.VERSION_NAME} · Android ${android.os.Build.VERSION.SDK_INT} · ${android.os.Build.MODEL}")
         appendLine("Роль: " + c.getSystemService(android.app.role.RoleManager::class.java).isRoleHeld(android.app.role.RoleManager.ROLE_DIALER))
         appendLine("Telecom default: " + c.getSystemService(android.telecom.TelecomManager::class.java).defaultDialerPackage)
         appendLine("Служба в процессе: ${CallStore.service != null}; вызовов: ${CallStore.liveCalls().size}")
