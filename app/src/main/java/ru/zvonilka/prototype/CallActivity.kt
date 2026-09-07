@@ -1,167 +1,128 @@
 package ru.zvonilka.prototype
 
-import android.app.Activity
 import android.content.Intent
-import android.graphics.Color
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.telecom.Call
-import android.telecom.CallAudioState
-import android.telecom.PhoneAccountHandle
-import android.telecom.TelecomManager
-import android.telecom.VideoProfile
-import android.view.*
-import android.widget.*
+import android.os.PowerManager
+import android.telecom.*
+import android.view.KeyEvent
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.unit.*
+import kotlinx.coroutines.delay
 
-class CallActivity : Activity() {
-    private lateinit var root: LinearLayout
-    private var selected: String? = null
-    private var keypad = false
-    private var toneCall: Call? = null
-    private var duration: TextView? = null
-    private val handler = Handler(Looper.getMainLooper())
-    private val changed: () -> Unit = { render() }
-    private val ticker = object : Runnable {
-        override fun run() {
-            val call = CallStore.calls[selected]
-            val connected = call?.details?.connectTimeMillis ?: 0L
-            duration?.text = if (connected > 0 && call?.state == Call.STATE_ACTIVE) {
-                val seconds = ((System.currentTimeMillis() - connected) / 1000).coerceAtLeast(0)
-                "%02d:%02d".format(seconds / 60, seconds % 60)
-            } else ""
-            handler.postDelayed(this, 1000)
-        }
+class CallActivity : ComponentActivity() {
+    private var revision by mutableIntStateOf(0)
+    private var selected by mutableStateOf<String?>(null)
+    private var toneCall:Call?=null
+    private var proximity:PowerManager.WakeLock?=null
+    private val listener:()->Unit={revision++}
+    override fun onCreate(savedInstanceState:Bundle?) {
+        super.onCreate(savedInstanceState);setShowWhenLocked(true);setTurnScreenOn(true)
+        selected=savedInstanceState?.getString("selected") ?: intent.getStringExtra("call_id")
+        val power=getSystemService(PowerManager::class.java)
+        if(power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) proximity=power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,"Zvonilka:proximity")
+        handleAnswer(intent)
+        setContent { PhoneTheme { CallScreen() } }
     }
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
-        selected = savedInstanceState?.getString("selected") ?: intent.getStringExtra("call_id")
-        keypad = savedInstanceState?.getBoolean("keypad") ?: false
-        root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 24)
-            setBackgroundColor(Color.rgb(20, 20, 22))
-            setOnApplyWindowInsetsListener { view, insets ->
-                view.setPadding(24, insets.systemWindowInsetTop + 24, 24, insets.systemWindowInsetBottom + 24)
-                insets
-            }
+    override fun onNewIntent(intent:Intent) { super.onNewIntent(intent);setIntent(intent);selected=intent.getStringExtra("call_id") ?: selected;handleAnswer(intent);revision++ }
+    private fun handleAnswer(intent:Intent) { if(intent.action=="answer") CallStore.calls[intent.getStringExtra("call_id")]?.takeIf{it.state==Call.STATE_RINGING}?.answer(VideoProfile.STATE_AUDIO_ONLY) }
+    override fun onStart() { super.onStart();CallStore.listeners.add(listener);revision++ }
+    override fun onStop() { CallStore.listeners.remove(listener);stopTone();releaseProximity();super.onStop() }
+    override fun onSaveInstanceState(outState:Bundle) {outState.putString("selected",selected);super.onSaveInstanceState(outState)}
+    private fun stopTone(){toneCall?.stopDtmfTone();toneCall=null}
+    private fun releaseProximity(){if(proximity?.isHeld==true) proximity?.release()}
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    @Composable private fun CallScreen() {
+        val tick=revision
+        val live=CallStore.liveCalls()
+        val key=if(selected in live) selected else live.entries.firstOrNull { it.value.state==Call.STATE_RINGING }?.key ?: live.keys.firstOrNull()
+        val call=live[key]
+        var lastPerson by remember { mutableStateOf<PersonRecord?>(null) }
+        var lastNumber by remember { mutableStateOf("") }
+        var seconds by remember { mutableLongStateOf(0) }
+        var keypad by remember { mutableStateOf(false) }
+        val person=call?.let { ContactCache.find(CallStore.label(it)) } ?: lastPerson
+        val audio=CallStore.service?.callAudioState
+        LaunchedEffect(key,tick) {
+            if(call!=null) { selected=key;lastPerson=ContactCache.find(CallStore.label(call));lastNumber=CallStore.label(call) }
+            val use=call?.state==Call.STATE_ACTIVE && audio?.route==CallAudioState.ROUTE_EARPIECE
+            if(use && proximity?.isHeld==false) proximity?.acquire(2*60*60*1000L) else if(!use) releaseProximity()
         }
-        setContentView(ScrollView(this).apply { isFillViewport = true; addView(root) })
-    }
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        selected = intent.getStringExtra("call_id") ?: selected
-        render()
-    }
-    override fun onStart() {
-        super.onStart()
-        CallStore.listeners.add(changed)
-        render()
-        handler.post(ticker)
-    }
-    override fun onStop() {
-        CallStore.listeners.remove(changed)
-        handler.removeCallbacks(ticker)
-        stopTone()
-        super.onStop()
-    }
-    override fun onSaveInstanceState(outState: Bundle) {
-        outState.putString("selected", selected)
-        outState.putBoolean("keypad", keypad)
-        super.onSaveInstanceState(outState)
-    }
-    private fun label(text: String, size: Float = 22f): TextView = TextView(this).apply {
-        this.text = text; textSize = size; gravity = Gravity.CENTER
-        setTextColor(Color.WHITE); setPadding(0, 12, 0, 12)
-        root.addView(this)
-    }
-    private fun button(text: String, enabled: Boolean = true, action: () -> Unit) {
-        root.addView(Button(this).apply {
-            this.text = text; isEnabled = enabled
-            setOnClickListener { action() }
-        })
-    }
-    private fun stopTone() { toneCall?.stopDtmfTone(); toneCall = null }
-    private fun render() {
-        stopTone()
-        val live = CallStore.liveCalls()
-        if (live.isEmpty()) { finish(); return }
-        if (selected !in live) selected = live.entries.firstOrNull { it.value.state == Call.STATE_RINGING }?.key ?: live.keys.first()
-        val call = live[selected] ?: return
-        root.removeAllViews()
-        label(CallStore.label(call), 32f)
-        label(CallStore.state(call))
-        duration = label("")
-        if (live.size > 1) live.forEach { (id, other) ->
-            if (id != selected) button("${CallStore.label(other)} · ${CallStore.state(other)}") { selected = id; render() }
+        LaunchedEffect(key,call?.state) {
+            if(call==null) { releaseProximity();delay(1000);finish() }
+            else while(true) { val start=call.details.connectTimeMillis;if(start>0) seconds=((System.currentTimeMillis()-start)/1000).coerceAtLeast(0);delay(1000) }
         }
-        if (call.state == Call.STATE_RINGING) {
-            button("Принять") { call.answer(VideoProfile.STATE_AUDIO_ONLY) }
-            button("Отклонить") { call.reject(false, null) }
-            return
-        }
-        if (call.state == Call.STATE_SELECT_PHONE_ACCOUNT) {
-            @Suppress("DEPRECATION")
-            val suggestions = call.details.extras?.getParcelableArrayList<android.telecom.PhoneAccountSuggestion>(Call.EXTRA_SUGGESTED_PHONE_ACCOUNTS)
-            @Suppress("DEPRECATION")
-            val accounts = suggestions?.map { it.phoneAccountHandle }
-                ?: call.details.extras?.getParcelableArrayList<PhoneAccountHandle>(Call.AVAILABLE_PHONE_ACCOUNTS).orEmpty()
-            val telecom = getSystemService(TelecomManager::class.java)
-            accounts.forEachIndexed { index, account ->
-                val name = telecom.getPhoneAccount(account)?.label ?: "SIM ${index + 1}"
-                button(name.toString()) { call.phoneAccountSelected(account, false) }
-            }
-            if (accounts.isEmpty()) label("SIM-карта недоступна. Завершите вызов и проверьте настройки SIM.", 16f)
-        }
-        val service = CallStore.service
-        val audio = service?.callAudioState
-        button(if (audio?.isMuted == true) "Включить микрофон" else "Выключить микрофон", audio != null) {
-            service?.setMuted(audio?.isMuted != true)
-        }
-        button("Звук: " + when (audio?.route) {
-            CallAudioState.ROUTE_SPEAKER -> "Динамик"
-            CallAudioState.ROUTE_BLUETOOTH -> "Bluetooth"
-            CallAudioState.ROUTE_WIRED_HEADSET -> "Гарнитура"
-            else -> "Телефон"
-        }, audio != null) {
-            val routes = listOf(CallAudioState.ROUTE_EARPIECE to "Телефон", CallAudioState.ROUTE_SPEAKER to "Динамик",
-                CallAudioState.ROUTE_WIRED_HEADSET to "Гарнитура", CallAudioState.ROUTE_BLUETOOTH to "Bluetooth")
-                .filter { (route, _) -> (audio?.supportedRouteMask ?: 0) and route != 0 }
-            android.app.AlertDialog.Builder(this).setTitle("Куда выводить звук")
-                .setItems(routes.map { it.second }.toTypedArray()) { _, index -> service?.setAudioRoute(routes[index].first) }.show()
-        }
-        if (call.details.can(Call.Details.CAPABILITY_HOLD)) {
-            if (call.state == Call.STATE_HOLDING) button("Продолжить разговор") { call.unhold() }
-            else if (call.state == Call.STATE_ACTIVE) button("Удержание") { call.hold() }
-        }
-        button(if (keypad) "Скрыть клавиатуру" else "Клавиатура", call.state == Call.STATE_ACTIVE) { keypad = !keypad; render() }
-        if (keypad && call.state == Call.STATE_ACTIVE) listOf("123", "456", "789", "*0#").forEach { digits ->
-            val row = LinearLayout(this)
-            digits.forEach { digit ->
-                row.addView(Button(this).apply {
-                    text = digit.toString(); textSize = 24f
-                    setOnTouchListener { view, event ->
-                        when (event.actionMasked) {
-                            MotionEvent.ACTION_DOWN -> { stopTone(); toneCall = call; call.playDtmfTone(digit); true }
-                            MotionEvent.ACTION_UP -> { stopTone(); view.performClick(); true }
-                            MotionEvent.ACTION_CANCEL -> { stopTone(); true }
-                            else -> true
+        Box(Modifier.fillMaxSize().background(Color(0xFF253542))) {
+            Photo(person,Modifier.fillMaxSize(),true)
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha=.48f)))
+            Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).padding(24.dp).verticalScroll(rememberScrollState()),horizontalAlignment=Alignment.CenterHorizontally) {
+                Spacer(Modifier.height(36.dp))
+                Text(person?.name ?: NumberTools.display(call?.let{CallStore.label(it)} ?: lastNumber).ifBlank{"Неизвестный номер"},fontSize=34.sp,color=Color.White)
+                Spacer(Modifier.height(12.dp))
+                Text(call?.details?.accountHandle?.let{Dialing.label(this@CallActivity,it)} ?: "",color=Color.White.copy(alpha=.8f))
+                Text(if(call==null) "Разговор ${NumberTools.duration(seconds)}" else CallStore.state(call),Modifier.padding(top=12.dp),fontSize=22.sp,color=Color.White)
+                if(call?.state==Call.STATE_ACTIVE) Text(NumberTools.duration(seconds),color=Color.White,fontSize=22.sp)
+                Spacer(Modifier.height(64.dp))
+                live.forEach { (id,other)->if(id!=key) TextButton(onClick={selected=id}){Text("${ContactCache.find(CallStore.label(other))?.name ?: CallStore.label(other)} · ${CallStore.state(other)}",color=Color.White)} }
+                if(call?.state==Call.STATE_RINGING) {
+                    Text("Проведите почти до конца вправо",color=Color.White.copy(alpha=.75f),fontSize=14.sp)
+                    Spacer(Modifier.height(16.dp))
+                    SwipeCall(onCall={call.answer(VideoProfile.STATE_AUDIO_ONLY)},onTap={}) { Box(Modifier.fillMaxWidth().background(Green).padding(20.dp),contentAlignment=Alignment.Center){Text("→  Ответить",color=Color.White,fontSize=22.sp)} }
+                    Spacer(Modifier.height(16.dp))
+                    SwipeCall(onCall={call.reject(false,null)},onTap={}) { Box(Modifier.fillMaxWidth().background(Red).padding(20.dp),contentAlignment=Alignment.Center){Text("→  Отклонить",color=Color.White,fontSize=22.sp)} }
+                } else if(call!=null) {
+                    if(call.state==Call.STATE_SELECT_PHONE_ACCOUNT) {
+                        @Suppress("DEPRECATION")
+                        val accounts=call.details.extras?.getParcelableArrayList<PhoneAccountSuggestion>(Call.EXTRA_SUGGESTED_PHONE_ACCOUNTS)?.map{it.phoneAccountHandle}.orEmpty()
+                        accounts.forEach { a->Button(onClick={call.phoneAccountSelected(a,false)}){Text(Dialing.label(this@CallActivity,a))} }
+                    }
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
+                        Control("Микрофон",if(audio?.isMuted==true) Icons.Default.MicOff else Icons.Default.Mic,audio?.isMuted==true){CallStore.service?.setMuted(audio?.isMuted!=true)}
+                        Control("Динамик",Icons.Default.VolumeUp,audio?.route==CallAudioState.ROUTE_SPEAKER){CallStore.service?.setAudioRoute(if(audio?.route==CallAudioState.ROUTE_SPEAKER) CallAudioState.ROUTE_WIRED_OR_EARPIECE else CallAudioState.ROUTE_SPEAKER)}
+                        Control("Аудиовыход",Icons.Default.Bluetooth){
+                            val routes=listOf(CallAudioState.ROUTE_EARPIECE to "Телефон",CallAudioState.ROUTE_SPEAKER to "Динамик",CallAudioState.ROUTE_BLUETOOTH to "Bluetooth",CallAudioState.ROUTE_WIRED_HEADSET to "Гарнитура").filter{(audio?.supportedRouteMask ?: 0) and it.first != 0}
+                            android.app.AlertDialog.Builder(this@CallActivity).setTitle("Аудиовыход").setItems(routes.map{it.second}.toTypedArray()){_,i->CallStore.service?.setAudioRoute(routes[i].first)}.show()
                         }
                     }
-                }, LinearLayout.LayoutParams(0, (64 * resources.displayMetrics.density).toInt(), 1f))
+                    Spacer(Modifier.height(24.dp))
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
+                        Control("Клавиатура",Icons.Default.Dialpad,keypad){keypad=!keypad}
+                        if(call.details.can(Call.Details.CAPABILITY_HOLD)) Control("Удержание",Icons.Default.Pause,call.state==Call.STATE_HOLDING){if(call.state==Call.STATE_HOLDING)call.unhold() else call.hold()}
+                        Control("Добавить",Icons.Default.Add){
+                            // MainActivity is not showWhenLocked: leaving the call requires unlock.
+                            startActivity(Intent(this@CallActivity,MainActivity::class.java).setAction(Intent.ACTION_DIAL))
+                        }
+                    }
+                    if(keypad && call.state==Call.STATE_ACTIVE) listOf("123","456","789","*0#").forEach{line->Row {
+                        line.forEach{ch->Box(Modifier.weight(1f).height(60.dp).pointerInteropFilter { event->when(event.action){android.view.MotionEvent.ACTION_DOWN->{stopTone();toneCall=call;call.playDtmfTone(ch)};android.view.MotionEvent.ACTION_UP,android.view.MotionEvent.ACTION_CANCEL->stopTone()};true },contentAlignment=Alignment.Center){Text(ch.toString(),fontSize=28.sp,color=Color.White)}}
+                    }}
+                    Spacer(Modifier.height(44.dp))
+                    FilledIconButton(onClick={call.disconnect()},modifier=Modifier.size(80.dp),colors=IconButtonDefaults.filledIconButtonColors(containerColor=Red,contentColor=Color.White)){Icon(Icons.Default.CallEnd,"Завершить",Modifier.size(34.dp))}
+                }
             }
-            root.addView(row)
         }
-        button("Завершить вызов") { call.disconnect() }
     }
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            val ringing = CallStore.calls.values.firstOrNull { it.state == Call.STATE_RINGING }
-            if (ringing != null) { ringing.reject(false, null); return true }
+    @Composable private fun Control(label:String,icon:androidx.compose.ui.graphics.vector.ImageVector,active:Boolean=false,action:()->Unit) {
+        Column(horizontalAlignment=Alignment.CenterHorizontally) {
+            FilledIconButton(onClick=action,modifier=Modifier.size(64.dp),colors=IconButtonDefaults.filledIconButtonColors(containerColor=if(active)Color.White else Color.White.copy(alpha=.15f),contentColor=if(active)Color.Black else Color.White)){Icon(icon,label)}
+            Text(label,color=Color.White,fontSize=12.sp,modifier=Modifier.padding(top=6.dp))
         }
-        return super.onKeyDown(keyCode, event)
+    }
+    override fun onKeyDown(keyCode:Int,event:KeyEvent):Boolean {
+        if(keyCode==KeyEvent.KEYCODE_VOLUME_UP||keyCode==KeyEvent.KEYCODE_VOLUME_DOWN) {
+            CallStore.calls.values.firstOrNull{it.state==Call.STATE_RINGING}?.let{it.reject(false,null);return true}
+        }
+        return super.onKeyDown(keyCode,event)
     }
 }

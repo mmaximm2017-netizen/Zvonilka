@@ -7,7 +7,12 @@ import android.os.Handler
 import android.os.Looper
 import android.telecom.*
 
-class PhoneService : InCallService() {
+class PhoneService : InCallService(), android.hardware.SensorEventListener {
+    private val seenEnded = mutableSetOf<Call>()
+    private var sawFaceUp = false
+    private var downSamples = 0
+    private val sensors get() = getSystemService(android.hardware.SensorManager::class.java)
+    private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val callbacks = mutableMapOf<Call, Call.Callback>()
     private val ids = mutableMapOf<Call, Int>()
     private var nextId = 100
@@ -29,6 +34,7 @@ class PhoneService : InCallService() {
     override fun onCreate() {
         super.onCreate()
         CallStore.service = this
+        io.execute { runCatching { PhoneData(this).contacts() }.onSuccess { ContactCache.people=it;handler.post { CallStore.changed() } } }
         // Telecom plays the ringtone: do not declare IN_CALL_SERVICE_RINGING.
         manager.createNotificationChannel(NotificationChannel("calls", "Входящие вызовы", NotificationManager.IMPORTANCE_HIGH).apply {
             setSound(null, null)
@@ -43,6 +49,10 @@ class PhoneService : InCallService() {
         if (call in callbacks) return
         val key = CallStore.add(call)
         ids[call] = nextId++
+        if(call.state==Call.STATE_RINGING && CallStore.calls.values.count{it.state==Call.STATE_RINGING}==1) {
+            sawFaceUp=false;downSamples=0
+            sensors.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)?.let { sensors.registerListener(this,it,android.hardware.SensorManager.SENSOR_DELAY_NORMAL) }
+        }
         val callback = object : Call.Callback() {
             override fun onCallDestroyed(call: Call) = removeCall(call)
             override fun onStateChanged(call: Call, state: Int) = refresh(call, key)
@@ -62,21 +72,26 @@ class PhoneService : InCallService() {
         if (call.state == Call.STATE_DISCONNECTED) { removeCall(call); return }
         publishedStates[call] = call.state
         val ringing = call.state == Call.STATE_RINGING
+        if(call.state==Call.STATE_ACTIVE) call.details.accountHandle?.let { Dialing.remember(this,CallStore.label(call),it) }
+        if(CallStore.calls.values.none{it.state==Call.STATE_RINGING}) sensors.unregisterListener(this)
         val open = PendingIntent.getActivity(this, id, Intent(this, CallActivity::class.java).apply {
             putExtra("call_id", key)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        fun action(name: String): PendingIntent = PendingIntent.getBroadcast(this, id,
+        fun action(name: String): PendingIntent = if(name=="answer") PendingIntent.getActivity(this,id,
+            Intent(this,CallActivity::class.java).setAction("answer").putExtra("call_id",key).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            else PendingIntent.getBroadcast(this, id,
             Intent(this, CallActionReceiver::class.java).setAction(name).putExtra("call_id", key),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val builder = Notification.Builder(this, if (ringing) "calls" else "ongoing")
             .setSmallIcon(android.R.drawable.sym_action_call)
-            .setContentTitle(CallStore.label(call)).setContentText(CallStore.state(call))
+            .setContentTitle(ContactCache.find(CallStore.label(call))?.name ?: CallStore.label(call)).setContentText(CallStore.state(call))
             .setCategory(Notification.CATEGORY_CALL).setOngoing(true).setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(open)
         if (ringing) builder.setFullScreenIntent(open, true)
         if (Build.VERSION.SDK_INT >= 31) {
-            val person = Person.Builder().setName(CallStore.label(call)).setImportant(true).build()
+            val person = Person.Builder().setName(ContactCache.find(CallStore.label(call))?.name ?: CallStore.label(call)).setImportant(true).build()
             builder.setStyle(if (ringing) Notification.CallStyle.forIncomingCall(person, action("reject"), action("answer"))
                 else Notification.CallStyle.forOngoingCall(person, action("hangup")))
         } else {
@@ -99,6 +114,7 @@ class PhoneService : InCallService() {
     override fun onBringToForeground(showDialpad: Boolean) = showCall()
     override fun onCallAudioStateChanged(audioState: CallAudioState?) { CallStore.changed() }
     private fun removeCall(call: Call) {
+        if(call.details.disconnectCause.code==DisconnectCause.MISSED && seenEnded.add(call)) MissedCalls.add(this,call.details.handle?.schemeSpecificPart.orEmpty())
         ids.remove(call)?.let { manager.cancel(it) }
         publishedStates.remove(call)
         callbacks.remove(call)?.let { call.unregisterCallback(it) }
@@ -112,6 +128,8 @@ class PhoneService : InCallService() {
     }
     private fun clearSession() {
         handler.removeCallbacks(reconcile)
+        sensors.unregisterListener(this)
+        seenEnded.clear()
         // Includes notifications left behind by a previous service instance.
         CallNotifications.clear(this)
         callbacks.forEach { (call, callback) -> call.unregisterCallback(callback) }
@@ -126,8 +144,20 @@ class PhoneService : InCallService() {
         clearSession()
         return super.onUnbind(intent)
     }
+    override fun onSensorChanged(event: android.hardware.SensorEvent) {
+        if(CallStore.calls.values.none{it.state==Call.STATE_RINGING}) { sensors.unregisterListener(this);return }
+        val z=event.values[2]
+        if(z>3f) sawFaceUp=true
+        downSamples=if(sawFaceUp && z < -7f) downSamples+1 else 0
+        if(downSamples>=3) {
+            getSystemService(TelecomManager::class.java).silenceRinger()
+            sensors.unregisterListener(this)
+        }
+    }
+    override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
     override fun onDestroy() {
         clearSession()
+        io.shutdown()
         super.onDestroy()
     }
 }

@@ -1,169 +1,309 @@
 package ru.zvonilka.prototype
 
-import android.app.Activity
-import android.content.Intent
-import android.content.ActivityNotFoundException
-import android.graphics.Color
-import android.net.Uri
+import android.Manifest
+import android.app.role.RoleManager
+import android.content.*
 import android.os.Bundle
-import android.view.Gravity
-import android.view.HapticFeedbackConstants
-import android.widget.*
+import android.net.Uri
+import android.provider.CallLog
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.unit.*
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.*
+import java.text.SimpleDateFormat
+import java.util.Locale
 
-class MainActivity : Activity() {
-    private lateinit var number: EditText
-    private lateinit var status: TextView
-    private val roles get() = getSystemService(android.app.role.RoleManager::class.java)
-
-    override fun onCreate(savedInstanceState: Bundle?) {
+class MainActivity : ComponentActivity() {
+    private val data by lazy { PhoneData(this) }
+    private var people by mutableStateOf(emptyList<PersonRecord>())
+    private var history by mutableStateOf(emptyList<HistoryRecord>())
+    private var error by mutableStateOf<String?>(null)
+    private var loading by mutableStateOf(false)
+    private var tab by mutableIntStateOf(0)
+    private var number by mutableStateOf("")
+    private var settings by mutableStateOf(false)
+    private var edit by mutableStateOf<PersonRecord?>(null)
+    private var editing by mutableStateOf(false)
+    private var photoDraft by mutableStateOf<ByteArray?>(null)
+    private var changedPhoto by mutableStateOf(false)
+    private var selected by mutableStateOf<PersonRecord?>(null)
+    private var confirmation by mutableStateOf<Pair<String,()->Unit>?>(null)
+    private var simRevision by mutableIntStateOf(0)
+    private val photoPicker=registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if(uri!=null) lifecycleScope.launch { runCatching { withContext(Dispatchers.IO) { data.photo(uri) } }.onSuccess { photoDraft=it;changedPhoto=true }.onFailure { error="Не удалось прочитать фото" } }
+    }
+    private val export=registerForActivityResult(ActivityResultContracts.CreateDocument("text/vcard")) { uri ->
+        if(uri!=null) work { contentResolver.openOutputStream(uri)?.use { it.write(Vcf.encode(people).toByteArray(Charsets.UTF_8)) } ?: error("Файл недоступен") }
+    }
+    private val importFile=registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if(uri!=null) lifecycleScope.launch {
+            runCatching { withContext(Dispatchers.IO) { contentResolver.openInputStream(uri)?.use { input ->
+                val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
+                while(true) { val n=input.read(buffer);if(n<0) break;require(out.size()+n<=5_000_000){"Файл больше 5 МБ"};out.write(buffer,0,n) }
+                Vcf.decode(out.toByteArray().toString(Charsets.UTF_8))
+            } ?: error("Файл недоступен") } }.onSuccess { entries ->
+                confirmation="Добавить ${entries.size} контактов в память телефона? Существующие не заменяются." to {
+                    work { var added=0; try { entries.forEach { data.save(null,it.name,it.numbers,null,false);added++ } } catch(e:Exception) { error("Добавлено $added из ${entries.size}. ${e.message}") } }
+                }
+            }.onFailure { error=it.message }
+        }
+    }
+    private val permissions=registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { refresh() }
+    override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 16, 24, 16)
-            setBackgroundColor(Color.rgb(20, 20, 22))
+        number=savedInstanceState?.getString("number").orEmpty()
+        handle(intent)
+        setContent { PhoneTheme { App() } }
+    }
+    override fun onNewIntent(intent:Intent) { super.onNewIntent(intent);setIntent(intent);handle(intent) }
+    private fun handle(intent:Intent) {
+        if(intent.action=="recent") { tab=0;settings=false;selected=null }
+        if(intent.action==Intent.ACTION_DIAL) { tab=2;number=NumberTools.clean(intent.data?.schemeSpecificPart.orEmpty()) }
+    }
+    override fun onSaveInstanceState(outState:Bundle) { outState.putString("number",number);super.onSaveInstanceState(outState) }
+    override fun onResume() { super.onResume();refresh() }
+    private fun refresh() {
+        lifecycleScope.launch {
+            loading=true
+            runCatching { withContext(Dispatchers.IO) { data.contacts() to data.history() } }
+                .onSuccess { (p,h)-> people=p;ContactCache.people=p;history=h;selected=selected?.let { old->p.find { it.id==old.id } } }
+                .onFailure { error="Не удалось загрузить данные: ${it.message}" }
+            loading=false
+            if(tab==0) MissedCalls.clear(this@MainActivity)
         }
-        root.setOnApplyWindowInsetsListener { view, insets ->
-            view.setPadding(24, insets.systemWindowInsetTop + 16, 24, insets.systemWindowInsetBottom + 16)
-            insets
+    }
+    private fun work(action:()->Unit) {
+        lifecycleScope.launch {
+            loading=true
+            runCatching { withContext(Dispatchers.IO) { action() } }.onFailure { error=it.message ?: "Операция не выполнена" }
+            refresh()
         }
-        root.addView(TextView(this).apply {
-            text = "Звонилка · 0.2.1"
-            textSize = 26f
-            setTextColor(Color.WHITE)
-        })
-        status = TextView(this).apply { textSize = 15f; setTextColor(Color.LTGRAY) }
-        root.addView(status, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(Button(this).apply {
-            text = "Настроить звонки"
-            setOnClickListener { setup() }
-        })
-        root.addView(Button(this).apply {
-            text = "Вернуться к разговору"
-            setOnClickListener {
-                if (CallStore.liveCalls().isNotEmpty()) startActivity(Intent(this@MainActivity, CallActivity::class.java))
-                else Toast.makeText(this@MainActivity, "Сейчас нет вызовов", Toast.LENGTH_SHORT).show()
-            }
-        })
-        number = EditText(this).apply {
-    id = android.view.View.generateViewId()
-            inputType = android.text.InputType.TYPE_CLASS_PHONE
-            showSoftInputOnFocus = false
-            textSize = 30f
-            gravity = Gravity.CENTER
-            setSingleLine(true)
-            setTextColor(Color.WHITE)
-            hint = "Номер телефона"
-            setHintTextColor(Color.GRAY)
-            setText(savedInstanceState?.getString("number") ?: "")
+    }
+    private fun toast(s:String)=android.widget.Toast.makeText(this,s,android.widget.Toast.LENGTH_SHORT).show()
+    private fun setup() {
+        val roles=getSystemService(RoleManager::class.java)
+        if(!roles.isRoleHeld(RoleManager.ROLE_DIALER)) {
+            if(roles.isRoleAvailable(RoleManager.ROLE_DIALER)) startActivity(roles.createRequestRoleIntent(RoleManager.ROLE_DIALER))
+            return
         }
-        root.addView(number)
-        root.addView(Button(this).apply {
-            text = "⌫"
-            contentDescription = "Удалить цифру. Удерживайте, чтобы очистить номер"
-            setOnClickListener {
-                val start = number.selectionStart.coerceAtLeast(0)
-                val end = number.selectionEnd.coerceAtLeast(start)
-                if (end > start) number.text.delete(start, end)
-                else if (start > 0) number.text.delete(start - 1, start)
-            }
-            setOnLongClickListener { number.text.clear(); true }
-        })
-        listOf("123", "456", "789", "*0#").forEach { digits ->
-            val row = LinearLayout(this)
-            digits.forEach { digit ->
-                row.addView(Button(this).apply {
-                    text = digit.toString()
-                    textSize = 28f
-                    setOnClickListener { insert(digit.toString()); performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
-                    if (digit == '0') setOnLongClickListener { insert("+"); true }
-                }, LinearLayout.LayoutParams(0, 72 * resources.displayMetrics.density.toInt().coerceAtLeast(1), 1f))
-            }
-            root.addView(row)
-        }
-        root.addView(Button(this).apply {
-            text = "Позвонить"
-            setTextColor(Color.WHITE)
-            backgroundTintList = android.content.res.ColorStateList.valueOf(Color.rgb(30, 150, 70))
-            setOnClickListener {
-                val value = number.text.toString().filter { it in "0123456789+*#" }
-                if (value.isEmpty()) {
-                    Toast.makeText(this@MainActivity, "Введите номер", Toast.LENGTH_SHORT).show()
-                } else try {
-                    if (!roles.isRoleHeld(android.app.role.RoleManager.ROLE_DIALER) ||
-                        checkSelfPermission(android.Manifest.permission.CALL_PHONE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                        setup()
-                    } else {
-                        getSystemService(android.telecom.TelecomManager::class.java).placeCall(Uri.fromParts("tel", value, null), Bundle())
+        val list=mutableListOf(Manifest.permission.CALL_PHONE,Manifest.permission.READ_CONTACTS,Manifest.permission.WRITE_CONTACTS,Manifest.permission.READ_CALL_LOG,Manifest.permission.WRITE_CALL_LOG,Manifest.permission.READ_PHONE_STATE)
+        if(android.os.Build.VERSION.SDK_INT>=33) list.add(Manifest.permission.POST_NOTIFICATIONS)
+        val missing=list.filter { !data.allowed(it) }
+        if(missing.isNotEmpty()) { permissions.launch(missing.toTypedArray());return }
+        val manager=getSystemService(android.app.NotificationManager::class.java)
+        if(android.os.Build.VERSION.SDK_INT>=34 && !manager.canUseFullScreenIntent()) startActivity(Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,Uri.parse("package:$packageName")))
+        else toast("Разрешения настроены")
+    }
+    private fun dial(value:String)=Dialing.place(this,value) { setup() }
+    private fun editor(p:PersonRecord?) { edit=p;photoDraft=p?.photo;changedPhoto=false;editing=true }
+    private fun copy(value:String) {
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Номер",value));toast("Номер скопирован")
+    }
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable private fun App() {
+        var query by rememberSaveable { mutableStateOf("") }
+        val scope=rememberCoroutineScope()
+        BackHandler(settings || selected!=null) { settings=false;selected=null }
+        Scaffold(topBar={ TopAppBar(title={ Text(if(settings) "Настройки" else if(selected!=null) "Контакт" else listOf("Недавние","Контакты","Клавиши")[tab]) },
+            navigationIcon={ if(settings||selected!=null) IconButton(onClick={settings=false;selected=null}) { Icon(Icons.Default.ArrowBack,"Назад") } },
+            actions={
+                if(tab==1 && selected==null && !settings) IconButton(onClick={editor(null)}) { Icon(Icons.Default.Add,"Создать контакт") }
+                IconButton(onClick={settings=!settings}) { Icon(Icons.Default.Settings,"Настройки") }
+            }) },bottomBar={ if(!settings && selected==null) NavigationBar {
+                listOf(Icons.Default.History,Icons.Default.Contacts,Icons.Default.Dialpad).forEachIndexed { i,icon->
+                    NavigationBarItem(selected=tab==i,onClick={tab=i;if(i==0) MissedCalls.clear(this@MainActivity)},icon={Icon(icon,null)},label={Text(listOf("Недавние","Контакты","Клавиши")[i])})
+                }
+            } }) { padding->
+            Column(Modifier.padding(padding).fillMaxSize()) {
+                if(loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if(!data.allowed(Manifest.permission.READ_CONTACTS) || !data.allowed(Manifest.permission.CALL_PHONE)) TextButton(onClick={setup()}) { Text("Настроить звонки и доступ к данным") }
+                when {
+                    settings -> Settings()
+                    selected!=null -> ContactCard(selected!!)
+                    tab==0 -> HistoryList(history)
+                    tab==1 -> {
+                        OutlinedTextField(query,{query=it},Modifier.fillMaxWidth().padding(12.dp),placeholder={Text("Имя или номер")},singleLine=true)
+                        val filtered=remember(people,query) { people.filter { NumberTools.matches(it.name,it.numbers,query) } }
+                        val state=rememberLazyListState()
+                        Row(Modifier.weight(1f)) {
+                            LazyColumn(state=state,modifier=Modifier.weight(1f),contentPadding=PaddingValues(horizontal=12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                                if(filtered.isEmpty()) item { Text("Нет локальных контактов",Modifier.padding(20.dp)) }
+                                items(filtered,key={it.id}) { p-> SwipeCall(onCall={dial(p.primary)},onTap={selected=p}) { PersonRow(p) } }
+                            }
+                            Column(Modifier.width(24.dp).verticalScroll(rememberScrollState()),horizontalAlignment=Alignment.CenterHorizontally) {
+                                (('А'..'Я').toList()+('A'..'Z').toList()+'#').forEach { ch->
+                                    Text(ch.toString(),fontSize=10.sp,color=MaterialTheme.colorScheme.primary,modifier=Modifier.clickable {
+                                        val i=filtered.indexOfFirst { p->if(ch=='#') p.name.firstOrNull()?.isLetter()!=true else p.name.startsWith(ch.toString(),true) }
+                                        if(i>=0) scope.launch { state.animateScrollToItem(i) }
+                                    }.padding(vertical=1.dp))
+                                }
+                            }
+                        }
                     }
-                } catch (_: RuntimeException) {
-                    Toast.makeText(this@MainActivity, "Не удалось начать вызов. Проверьте разрешения и SIM-карту", Toast.LENGTH_LONG).show()
+                    else -> Keypad()
                 }
             }
-        })
-        setContentView(root)
-        if (savedInstanceState == null) readNumber(intent)
+        }
+        if(editing) Editor()
+        confirmation?.let { (title,action)->Confirm(title,{confirmation=null}) { confirmation=null;action() } }
+        error?.let { message->AlertDialog(onDismissRequest={error=null},title={Text("Звонилка")},text={Text(message)},confirmButton={TextButton(onClick={error=null}){Text("Понятно")}}) }
     }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        readNumber(intent)
-    }
-    private fun readNumber(intent: Intent) {
-        if (intent.action == Intent.ACTION_DIAL && intent.data?.scheme == "tel") {
-            number.setText(intent.data?.schemeSpecificPart ?: "")
-            number.setSelection(number.length())
+    @Composable private fun PersonRow(p:PersonRecord,number:String=p.primary) {
+        Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
+            Photo(p,Modifier.size(48.dp).clip(CircleShape));Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) { Text(p.name,style=MaterialTheme.typography.titleMedium);Text(NumberTools.display(number),style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
-    override fun onResume() {
-        super.onResume()
-        val ready = roles.isRoleHeld(android.app.role.RoleManager.ROLE_DIALER)
-        val notifications = getSystemService(android.app.NotificationManager::class.java)
-        status.text = when {
-            !ready -> "Назначьте Звонилку приложением телефона по умолчанию."
-            checkSelfPermission(android.Manifest.permission.CALL_PHONE) != android.content.pm.PackageManager.PERMISSION_GRANTED -> "Разрешите телефонные вызовы."
-            !notifications.areNotificationsEnabled() -> "Включите уведомления для входящих вызовов."
-            android.os.Build.VERSION.SDK_INT >= 34 && !notifications.canUseFullScreenIntent() -> "Разрешите полноэкранные уведомления для звонков при заблокированном экране."
-            else -> "Звонилка назначена по умолчанию. Готова к проверке звонков."
+    @Composable private fun HistoryList(rows:List<HistoryRecord>) {
+        var expanded by remember { mutableStateOf<Long?>(null) }
+        var chosen by remember { mutableStateOf(emptySet<Long>()) }
+        Column {
+            if(chosen.isNotEmpty()) Row {
+                TextButton(onClick={confirmation="Удалить выбранные вызовы (${chosen.size})?" to { val ids=chosen;chosen=emptySet();work { data.deleteHistory(ids) } }}) { Text("Удалить (${chosen.size})") }
+                TextButton(onClick={confirmation="Очистить всю показанную историю (${rows.size})?" to { val ids=rows.map { it.id }.toSet();chosen=emptySet();work { data.deleteHistory(ids) } }}) { Text("Очистить всё") }
+                TextButton(onClick={chosen=emptySet()}) { Text("Отмена") }
+            }
+            LazyColumn(contentPadding=PaddingValues(12.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                if(rows.isEmpty()) item { Text("Вызовов пока нет",Modifier.padding(20.dp)) }
+                items(rows,key={it.id}) { h->
+                    val p=people.firstOrNull { it.numbers.any { n->NumberTools.key(n)==NumberTools.key(h.number) } }
+                    val color=when(h.type) { CallLog.Calls.MISSED_TYPE->Red;CallLog.Calls.OUTGOING_TYPE->Green;else->Blue }
+                    val kind=when(h.type) { CallLog.Calls.MISSED_TYPE->"Пропущенный";CallLog.Calls.OUTGOING_TYPE->"Исходящий";CallLog.Calls.REJECTED_TYPE->"Отклонённый";else->"Входящий" }
+                    SwipeCall(onCall={dial(h.number)},onTap={if(chosen.isNotEmpty()) chosen=if(h.id in chosen) chosen-h.id else chosen+h.id else expanded=if(expanded==h.id) null else h.id},onLong={chosen=chosen+h.id}) {
+                        Column(Modifier.padding(14.dp)) {
+                            Row(verticalAlignment=Alignment.CenterVertically) {
+                                Icon(if(h.type==CallLog.Calls.OUTGOING_TYPE) Icons.Default.CallMade else if(h.type==CallLog.Calls.MISSED_TYPE) Icons.Default.CallMissed else Icons.Default.CallReceived,null,tint=color)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) { Text(p?.name ?: NumberTools.display(h.number).ifBlank { "Скрытый номер" },color=color,style=MaterialTheme.typography.titleMedium)
+                                    Text(SimpleDateFormat("dd.MM · HH:mm",Locale.getDefault()).format(h.date)+" · "+NumberTools.duration(h.seconds),style=MaterialTheme.typography.bodySmall)
+                                    Text(simLabel(h.accountId),style=MaterialTheme.typography.bodySmall) }
+                                if(h.id in chosen) Icon(Icons.Default.CheckCircle,null,tint=Green)
+                            }
+                            if(expanded==h.id) {
+                                Text("$kind · "+SimpleDateFormat("dd.MM.yyyy HH:mm:ss",Locale.getDefault()).format(h.date),Modifier.padding(top=12.dp))
+                                Row { TextButton(onClick={dial(h.number)}) { Text("Позвонить") };TextButton(onClick={copy(h.number)}){Text("Копировать")};if(p!=null)TextButton(onClick={selected=p}){Text("Контакт")} }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
-    private fun setup() {
-        if (!roles.isRoleHeld(android.app.role.RoleManager.ROLE_DIALER)) {
-            if (roles.isRoleAvailable(android.app.role.RoleManager.ROLE_DIALER))
-                startActivityForResult(roles.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER), 10)
-            return
+    private fun simLabel(id:String?) = Dialing.accounts(this).firstOrNull { it.id==id }?.let { Dialing.label(this,it) } ?: "SIM не указана"
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable private fun Keypad() {
+        var picked by remember { mutableStateOf(false) }
+        val matches=remember(number,people,picked) { if(number.isBlank()||picked) emptyList() else people.flatMap { p->p.numbers.filter { NumberTools.key(it).contains(NumberTools.key(number)) || NumberTools.t9(p.name).contains(number) }.map { p to it } } }
+        Column(Modifier.fillMaxSize().padding(horizontal=16.dp)) {
+            LazyColumn(Modifier.weight(1f)) { items(matches,key={"${it.first.id}:${it.second}"}) { (p,n)->Box(Modifier.clickable { number=NumberTools.clean(n);picked=true }) { PersonRow(p,n) } } }
+            val p=people.firstOrNull { it.numbers.any { n->NumberTools.key(n)==NumberTools.key(number) } }
+            if(p!=null) Text(p.name,Modifier.align(Alignment.CenterHorizontally),style=MaterialTheme.typography.titleMedium)
+            else if(number.isNotBlank()) Row {
+                TextButton(onClick={editor(PersonRecord(-1,"",listOf(number)))}) { Text("Создать контакт") }
+                TextButton(onClick={
+                    if(people.isEmpty()) toast("Сначала создайте контакт") else android.app.AlertDialog.Builder(this@MainActivity).setTitle("Добавить номер к контакту")
+                        .setItems(people.map { it.name }.toTypedArray()) { _,i->editor(people[i].copy(numbers=people[i].numbers+number)) }.show()
+                }) { Text("Добавить к существующему") }
+            }
+            Row(verticalAlignment=Alignment.CenterVertically) {
+                Text(NumberTools.display(number).ifBlank { "Номер телефона" },Modifier.weight(1f).combinedClickable(onClick={},onLongClick={
+                    val clip=getSystemService(ClipboardManager::class.java).primaryClip
+                    if(clip!=null && clip.itemCount>0) { number=NumberTools.clean(clip.getItemAt(0).coerceToText(this@MainActivity).toString());picked=false }
+                }),fontSize=26.sp,maxLines=1)
+                Box(Modifier.size(48.dp).combinedClickable(onClick={number=number.dropLast(1);picked=false},onLongClick={number="";picked=false}),contentAlignment=Alignment.Center) { Icon(Icons.Default.Backspace,"Удалить; удерживать для очистки") }
+            }
+            listOf("123","456","789","*0#").forEach { line->Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
+                line.forEach { digit->
+                    Surface(Modifier.padding(4.dp).weight(1f).height(60.dp).combinedClickable(onClick={
+                        number+=digit;picked=false
+                        if(getSharedPreferences("settings",0).getBoolean("haptic",true)) window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                    },onLongClick={if(digit=='0') { number+="+";picked=false }}),shape=CircleShape,color=MaterialTheme.colorScheme.surfaceVariant) {
+                        Box(contentAlignment=Alignment.Center) { Text(digit.toString(),fontSize=30.sp) }
+                    }
+                }
+            } }
+            val ignored=simRevision
+            Box(Modifier.fillMaxWidth().padding(vertical=8.dp).height(62.dp).clip(CircleShape).background(Green).combinedClickable(onClick={dial(number)},onLongClick={Dialing.choose(this@MainActivity,number.ifBlank { null }){simRevision++}}),contentAlignment=Alignment.Center) {
+                Row(verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Default.Call,"Позвонить",tint=Color.White);Spacer(Modifier.width(12.dp));Text(Dialing.selectedLabel(this@MainActivity,number),color=Color.White) }
+            }
         }
-        val permissions = mutableListOf(android.Manifest.permission.CALL_PHONE)
-        if (android.os.Build.VERSION.SDK_INT >= 33) permissions.add(android.Manifest.permission.POST_NOTIFICATIONS)
-        val missing = permissions.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
-        if (missing.isNotEmpty()) {
-            requestPermissions(missing.toTypedArray(), 11)
-            return
+    }
+    @Composable private fun ContactCard(p:PersonRecord) {
+        var menu by remember { mutableStateOf(false) }
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            Box(Modifier.fillMaxWidth().height(280.dp)) { Photo(p,Modifier.fillMaxSize(),true);Text(p.name,Modifier.align(Alignment.BottomStart).background(Color.Black.copy(alpha=.35f)).fillMaxWidth().padding(20.dp),fontSize=30.sp,color=Color.White) }
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
+                IconButton(onClick={dial(p.primary)}){Icon(Icons.Default.Call,"Позвонить")}
+                IconButton(onClick={try { startActivity(Intent(Intent.ACTION_SENDTO,Uri.fromParts("smsto",p.primary,null))) } catch(_:ActivityNotFoundException){toast("Приложение SMS недоступно")}}){Icon(Icons.Default.Sms,"SMS")}
+                IconButton(onClick={copy(p.primary)}){Icon(Icons.Default.ContentCopy,"Скопировать")}
+                IconButton(onClick={editor(p)}){Icon(Icons.Default.Edit,"Редактировать")}
+                Box { IconButton(onClick={menu=true}){Icon(Icons.Default.MoreVert,"Меню")};DropdownMenu(menu,{menu=false}){DropdownMenuItem(text={Text("Удалить контакт")},onClick={menu=false;confirmation="Удалить ${p.name} из памяти телефона?" to { selected=null;work{data.deleteContact(p.id)} }})} }
+            }
+            p.numbers.forEachIndexed { i,n->TextButton(onClick={
+                android.app.AlertDialog.Builder(this@MainActivity).setTitle(NumberTools.display(n)).setItems(arrayOf("Позвонить","Сделать основным","Скопировать")) { _,action->when(action){0->dial(n);1->work{data.save(p.id,p.name,listOf(n)+p.numbers.filter{it!=n},null,false)};2->copy(n)} }.show()
+            }) { Text(NumberTools.display(n)+(if(i==0) " · основной" else "")) } }
+            Text("История",Modifier.padding(16.dp),style=MaterialTheme.typography.titleLarge)
+            // Non-nested lazy list: the card owns the scroll.
+            history.filter { h->p.numbers.any { NumberTools.key(it)==NumberTools.key(h.number) } }.forEach { h->
+                val color=if(h.type==CallLog.Calls.MISSED_TYPE) Red else if(h.type==CallLog.Calls.OUTGOING_TYPE) Green else Blue
+                Text((if(h.type==CallLog.Calls.OUTGOING_TYPE) "↗ " else "↙ ")+SimpleDateFormat("dd.MM.yyyy HH:mm",Locale.getDefault()).format(h.date)+" · "+NumberTools.duration(h.seconds)+" · "+simLabel(h.accountId),Modifier.padding(horizontal=16.dp,vertical=8.dp),color=color)
+            }
         }
-        val notifications = getSystemService(android.app.NotificationManager::class.java)
-        if (!notifications.areNotificationsEnabled()) {
-            startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))
-        } else if (android.os.Build.VERSION.SDK_INT >= 34 && !notifications.canUseFullScreenIntent()) {
-            startActivity(Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
-        } else Toast.makeText(this, "Звонки настроены", Toast.LENGTH_SHORT).show()
     }
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 10 && resultCode == RESULT_OK) setup()
+    @Composable private fun Editor() {
+        var name by remember(edit) { mutableStateOf(edit?.name.orEmpty()) }
+        var nums by remember(edit) { mutableStateOf(edit?.numbers?.ifEmpty { listOf("") } ?: listOf("")) }
+        AlertDialog(onDismissRequest={editing=false},title={Text(if(edit==null||edit!!.id<0) "Новый контакт" else "Редактирование")},text={
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Photo(PersonRecord(-1,name,nums,photoDraft),Modifier.size(120.dp).clip(CircleShape))
+                TextButton(onClick={photoPicker.launch("image/*")}) { Text("Выбрать фото") }
+                OutlinedTextField(name,{name=it},label={Text("Имя")},singleLine=true)
+                nums.forEachIndexed { i,n->Row(verticalAlignment=Alignment.CenterVertically) {
+                    OutlinedTextField(n,{value->nums=nums.toMutableList().also{it[i]=NumberTools.clean(value)}},Modifier.weight(1f),label={Text(if(i==0) "Основной номер" else "Номер")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Phone))
+                    IconButton(onClick={nums=nums.filterIndexed{j,_->i!=j}.ifEmpty{listOf("")}}) { Icon(Icons.Default.Remove,"Удалить номер") }
+                } }
+                TextButton(onClick={nums=nums+""}) { Text("Добавить номер") }
+                Text("Хранение: телефон",style=MaterialTheme.typography.bodySmall)
+            }
+        },confirmButton={TextButton(enabled=!loading && name.isNotBlank() && nums.any{it.isNotBlank()},onClick={
+            val id=edit?.id?.takeIf{it>=0};val photo=photoDraft;val change=changedPhoto
+            lifecycleScope.launch { loading=true;runCatching{withContext(Dispatchers.IO){data.save(id,name,nums,photo,change)}}.onSuccess{editing=false}.onFailure{error=it.message};refresh() }
+        }){Text("Сохранить")}},dismissButton={TextButton(onClick={editing=false}){Text("Отмена")}})
     }
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 11 && grantResults.isNotEmpty() && grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }) setup()
-    }
-
-    private fun insert(value: String) {
-        val start = number.selectionStart.coerceAtLeast(0)
-        val end = number.selectionEnd.coerceAtLeast(start)
-        number.text.replace(start, end, value)
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        outState.putString("number", number.text.toString())
-        super.onSaveInstanceState(outState)
+    @Composable private fun Settings() {
+        var haptic by remember { mutableStateOf(getSharedPreferences("settings",0).getBoolean("haptic",true)) }
+        Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Text("Звонилка 0.3",style=MaterialTheme.typography.headlineMedium)
+            Text("Тема: как в системе")
+            Row(verticalAlignment=Alignment.CenterVertically) { Text("Вибрация клавиш",Modifier.weight(1f));Switch(haptic,{haptic=it;getSharedPreferences("settings",0).edit().putBoolean("haptic",it).apply()}) }
+            Button(onClick={setup()}) { Text("Настроить разрешения") }
+            Text(if(getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_DIALER)) "Телефон по умолчанию: Звонилка" else "Звонилка не назначена по умолчанию")
+            Text("Контакты: "+if(data.allowed(Manifest.permission.READ_CONTACTS)) "разрешены" else "нет доступа")
+            Text("История: "+if(data.allowed(Manifest.permission.READ_CALL_LOG)) "разрешена" else "нет доступа")
+            Button(onClick={Dialing.choose(this@MainActivity,null){simRevision++}}) { Text("SIM по умолчанию") }
+            Button(onClick={export.launch("Zvonilka-contacts.vcf")},enabled=people.isNotEmpty()) { Text("Экспорт контактов в VCF") }
+            Button(onClick={importFile.launch(arrayOf("text/*","application/octet-stream"))},enabled=data.allowed(Manifest.permission.WRITE_CONTACTS)) { Text("Импорт VCF") }
+            Text("Онлайн-определитель недоступен: поставщик базы не выбран.")
+            Text("SIM-контакты и еженедельные копии пока не включены.")
+        }
     }
 }
