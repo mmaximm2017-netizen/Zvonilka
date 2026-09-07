@@ -384,7 +384,7 @@ class MainActivity : ComponentActivity() {
             '5' to "МНОП\nJKL", '6' to "РСТУ\nMNO", '7' to "ФХЦЧ\nPQRS",
             '8' to "ШЩЪЫ\nTUV", '9' to "ЬЭЮЯ\nWXYZ", '0' to "+"
         )
-        Column(Modifier.fillMaxSize().padding(horizontal=18.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().padding(horizontal=10.dp),horizontalAlignment=Alignment.CenterHorizontally) {
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth().height(54.dp),verticalAlignment=Alignment.CenterVertically) {
                 Box(
@@ -427,12 +427,12 @@ class MainActivity : ComponentActivity() {
                     }) { Text("Добавить к существующему") }
                 }
             }
-            Spacer(Modifier.height(if(matches.isEmpty() && exact==null && number.isBlank())24.dp else 10.dp))
+            Spacer(Modifier.height(if(matches.isEmpty() && exact==null && number.isBlank())46.dp else 18.dp))
             listOf("123","456","789","*0#").forEach { line->
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
                     line.forEach { digit->
                         Surface(
-                            Modifier.padding(vertical=4.dp).size(74.dp)
+                            Modifier.padding(vertical=6.dp).size(86.dp)
                                 .border(1.dp,MaterialTheme.colorScheme.outline.copy(alpha=.85f),CircleShape)
                                 .combinedClickable(onClick={
                                     number+=digit;picked=false
@@ -442,17 +442,17 @@ class MainActivity : ComponentActivity() {
                             color=Color.Transparent
                         ) {
                             Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
-                                Text(digit.toString(),fontSize=31.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurface)
-                                Text(labels[digit].orEmpty(),fontSize=9.sp,lineHeight=10.sp,textAlign=androidx.compose.ui.text.style.TextAlign.Center,color=MaterialTheme.colorScheme.onSurfaceVariant,fontWeight=FontWeight.Medium)
+                                Text(digit.toString(),fontSize=36.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurface)
+                                Text(labels[digit].orEmpty(),fontSize=10.sp,lineHeight=11.sp,textAlign=androidx.compose.ui.text.style.TextAlign.Center,color=MaterialTheme.colorScheme.onSurfaceVariant,fontWeight=FontWeight.Medium)
                             }
                         }
                     }
                 }
             }
             val ignored=simRevision
-            Spacer(Modifier.height(10.dp))
-            Box(Modifier.size(68.dp).clip(CircleShape).background(Green).combinedClickable(onClick={dial(number)},onLongClick={Dialing.choose(this@MainActivity,number.ifBlank { null }){simRevision++}}),contentAlignment=Alignment.Center) {
-                Icon(Icons.Default.Call,"Позвонить; удерживать для выбора SIM",Modifier.size(30.dp),tint=Color.White)
+            Spacer(Modifier.height(14.dp))
+            Box(Modifier.size(76.dp).clip(CircleShape).background(Green).combinedClickable(onClick={dial(number)},onLongClick={Dialing.choose(this@MainActivity,number.ifBlank { null }){simRevision++}}),contentAlignment=Alignment.Center) {
+                Icon(Icons.Default.Call,"Позвонить; удерживать для выбора SIM",Modifier.size(33.dp),tint=Color.White)
             }
             TextButton(onClick={Dialing.choose(this@MainActivity,number.ifBlank{null}){simRevision++}},contentPadding=PaddingValues(horizontal=10.dp,vertical=4.dp)) {
                 Icon(Icons.Default.SimCard,null,Modifier.size(17.dp));Spacer(Modifier.width(5.dp));Text(Dialing.selectedLabel(this@MainActivity,number),style=MaterialTheme.typography.labelMedium);Icon(Icons.Default.ExpandMore,null,Modifier.size(17.dp))
