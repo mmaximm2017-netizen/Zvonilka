@@ -8,6 +8,7 @@ import android.os.Looper
 import android.telecom.*
 
 class PhoneService : InCallService(), android.hardware.SensorEventListener {
+    private var contactsReady=false
     private val seenEnded = mutableSetOf<Call>()
     private var sawFaceUp = false
     private var downSamples = 0
@@ -35,7 +36,7 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         super.onCreate()
         CallDiagnostics.record(this, "service_create")
         CallStore.service = this
-        io.execute { runCatching { PhoneData(this).contacts() }.onSuccess { ContactCache.people=it;handler.post { CallStore.changed() } } }
+        io.execute { runCatching { PhoneData(this).contacts() }.onSuccess { ContactCache.people=it;contactsReady=true;handler.post { CallStore.changed() } } }
         // Telecom plays the ringtone: do not declare IN_CALL_SERVICE_RINGING.
         manager.createNotificationChannel(NotificationChannel("calls", "Входящие вызовы", NotificationManager.IMPORTANCE_HIGH).apply {
             setSound(null, null)
@@ -72,6 +73,19 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         handler.removeCallbacks(reconcile)
         handler.postDelayed(reconcile, 1000)
         if (call.state != Call.STATE_RINGING && call.state != Call.STATE_DISCONNECTED) showCall(key)
+        if(CallerId.enabled(this) && call.details.callDirection==Call.Details.DIRECTION_INCOMING && call.details.handlePresentation==TelecomManager.PRESENTATION_ALLOWED) {
+            val number=call.details.handle?.schemeSpecificPart.orEmpty()
+            io.execute {
+                // The initial contacts task is queued before this task on the same executor.
+                val result=if(contactsReady && PhoneData(this).allowed(android.Manifest.permission.READ_CONTACTS) && ContactCache.find(number)==null) CallerId.lookup(this,number) else null
+                handler.post {
+                    if(result!=null && CallerId.enabled(this) && CallStore.calls[key]===call && call.state!=Call.STATE_DISCONNECTED) {
+                        CallerId.results[key]=result
+                        refresh(call,key)
+                    }
+                }
+            }
+        }
     }
 
     private fun refresh(call: Call, key: String) {
@@ -97,7 +111,7 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val builder = Notification.Builder(this, if (ringing) "calls" else "ongoing")
             .setSmallIcon(android.R.drawable.sym_action_call)
-            .setContentTitle(ContactCache.find(CallStore.label(call))?.name ?: CallStore.label(call)).setContentText(CallStore.state(call))
+            .setContentTitle(ContactCache.find(CallStore.label(call))?.name ?: CallStore.label(call)).setContentText(CallerId.text(this,key)?.let { CallStore.state(call)+" · "+it } ?: CallStore.state(call))
             .setCategory(Notification.CATEGORY_CALL).setOngoing(true).setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(open)
         if (ringing) builder.setFullScreenIntent(open, true)
@@ -138,6 +152,7 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         ids.remove(call)?.let { manager.cancel(it) }
         publishedStates.remove(call)
         callbacks.remove(call)?.let { call.unregisterCallback(it) }
+        CallStore.calls.filterValues{it===call}.keys.forEach{CallerId.results.remove(it)}
         CallStore.calls.entries.removeAll { it.value == call }
         if (ids.isEmpty()) handler.removeCallbacks(reconcile)
         CallStore.changed()
@@ -156,6 +171,7 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         callbacks.clear()
         ids.clear()
         publishedStates.clear()
+        CallerId.results.clear()
         CallStore.calls.clear()
         CallStore.service = null
         CallStore.changed()

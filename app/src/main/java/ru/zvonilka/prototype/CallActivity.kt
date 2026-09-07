@@ -79,6 +79,7 @@ class CallActivity : ComponentActivity() {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).padding(24.dp).verticalScroll(rememberScrollState()),horizontalAlignment=Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(36.dp))
                 Text(person?.name ?: NumberTools.display(call?.let{CallStore.label(it)} ?: lastNumber).ifBlank{"Неизвестный номер"},fontSize=32.sp,fontWeight=FontWeight.Bold,color=Color.White)
+                if(person==null) CallerId.text(this@CallActivity,key)?.let { Text(it,Modifier.padding(top=10.dp),fontSize=16.sp,color=Color.White) }
                 Spacer(Modifier.height(12.dp))
                 Text(call?.details?.accountHandle?.let{Dialing.label(this@CallActivity,it)} ?: "",color=Color.White.copy(alpha=.8f))
                 Text(if(call==null) "Разговор ${NumberTools.duration(seconds)}" else CallStore.state(call),Modifier.padding(top=12.dp),fontSize=22.sp,color=Color.White)

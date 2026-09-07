@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
@@ -93,7 +94,8 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
     val bitmap=large ?: thumbnail
     Box(modifier.background(Brush.linearGradient(if(full) listOf(Color(0xFF123D70),Color(0xFF245F97)) else listOf(MaterialTheme.colorScheme.primaryContainer,MaterialTheme.colorScheme.secondaryContainer))),contentAlignment=Alignment.Center) {
         if(bitmap!=null) Image(bitmap,null,Modifier.fillMaxSize(),contentScale=ContentScale.Crop,filterQuality=FilterQuality.High)
-        else Text(NumberTools.initials(person?.name ?: "?"),fontSize=if(full) 72.sp else 19.sp,color=if(full) Color.White else MaterialTheme.colorScheme.onPrimaryContainer)
+        else if(person==null) Icon(Icons.Outlined.Person,"Нет фото",Modifier.size(if(full) 96.dp else 28.dp),tint=if(full) Color.White else MaterialTheme.colorScheme.primary)
+        else Text(NumberTools.initials(person.name),fontSize=if(full) 72.sp else 19.sp,color=if(full) Color.White else MaterialTheme.colorScheme.onPrimaryContainer)
     }
 }
 @OptIn(ExperimentalFoundationApi::class)

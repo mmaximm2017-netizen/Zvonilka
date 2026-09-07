@@ -205,7 +205,7 @@ class MainActivity : ComponentActivity() {
     @Composable private fun PersonRow(p:PersonRecord,number:String=p.primary) {
         Row(Modifier.fillMaxWidth().padding(horizontal=14.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
             Photo(p,Modifier.size(42.dp).clip(CircleShape));Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) { Text(p.name,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis);Spacer(Modifier.height(3.dp));Text(NumberTools.display(number),fontSize=13.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+            Column(Modifier.weight(1f)) { Text(p.name,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis);Spacer(Modifier.height(3.dp));Text(NumberTools.display(number),fontSize=13.sp,letterSpacing=0.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
     @Composable private fun HistoryList(rows:List<HistoryRecord>) {
@@ -245,7 +245,7 @@ class MainActivity : ComponentActivity() {
                     val last=index==visible.lastIndex || dates[index+1]!=day
                     val dayLabel=when(day) { today->"Сегодня";today.minusDays(1)->"Вчера";else->day.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy",Locale("ru"))) }
                     Column {
-                    if(first) Text(dayLabel,Modifier.padding(start=14.dp,top=18.dp,bottom=8.dp),fontSize=13.sp,fontWeight=FontWeight.Medium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    if(first) Text(dayLabel,Modifier.padding(start=14.dp,top=if(index==0) 4.dp else 14.dp,bottom=8.dp),fontSize=13.sp,fontWeight=FontWeight.Medium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     val p=people.firstOrNull { it.numbers.any { n->NumberTools.key(n)==NumberTools.key(h.number) } }
                     val color=historyColor(h.type)
                     val kind=when(h.type) { CallLog.Calls.MISSED_TYPE->"Пропущенный";CallLog.Calls.OUTGOING_TYPE->"Исходящий";CallLog.Calls.REJECTED_TYPE->"Отклонённый";else->"Входящий" }
@@ -379,6 +379,7 @@ class MainActivity : ComponentActivity() {
         }){Text("Сохранить")}},dismissButton={TextButton(onClick={editing=false}){Text("Отмена")}})
     }
     @Composable private fun Settings() {
+        var callerId by remember { mutableStateOf(CallerId.enabled(this)) }
         var haptic by remember { mutableStateOf(getSharedPreferences("settings",0).getBoolean("haptic",true)) }
         Column(Modifier.padding(horizontal=16.dp).verticalScroll(rememberScrollState()).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Surface(shape=RoundedCornerShape(28.dp),color=MaterialTheme.colorScheme.primaryContainer,modifier=Modifier.fillMaxWidth()) {
@@ -421,7 +422,14 @@ class MainActivity : ComponentActivity() {
             }
             SectionLabel("ВОЗМОЖНОСТИ")
             SettingsGroup {
-            Text("Онлайн-определитель пока недоступен",style=MaterialTheme.typography.titleMedium)
+            Text("Бесплатная проверка спама",style=MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment=Alignment.CenterVertically) {
+                Text("PhoneBlock",Modifier.weight(1f))
+                Switch(callerId,{ enabled -> callerId=enabled;CallerId.setEnabled(this@MainActivity,enabled) })
+            }
+            Text("При включении неизвестный входящий номер передаётся PhoneBlock через интернет. Контакты и журнал не загружаются. Звонки не блокируются.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Это проверка по жалобам пользователей, а не подтверждение личности. Названия организаций не определяются. Полнота базы российских номеров не проверена.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick={startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://phoneblock.net/phoneblock/")))}) { Text("О сервисе PhoneBlock") }
             Text("SIM-контакты и еженедельные копии пока не включены.",color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
