@@ -6,6 +6,8 @@ import android.os.PowerManager
 import android.telecom.*
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -17,6 +19,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.unit.*
 import kotlinx.coroutines.delay
@@ -28,7 +32,7 @@ class CallActivity : ComponentActivity() {
     private var proximity:PowerManager.WakeLock?=null
     private val listener:()->Unit={revision++}
     override fun onCreate(savedInstanceState:Bundle?) {
-        super.onCreate(savedInstanceState);setShowWhenLocked(true);setTurnScreenOn(true)
+        super.onCreate(savedInstanceState);enableEdgeToEdge(statusBarStyle=SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),navigationBarStyle=SystemBarStyle.dark(android.graphics.Color.TRANSPARENT));setShowWhenLocked(true);setTurnScreenOn(true)
         CallDiagnostics.record(this, "screen_created")
         selected=savedInstanceState?.getString("selected") ?: intent.getStringExtra("call_id")
         val power=getSystemService(PowerManager::class.java)
@@ -64,12 +68,12 @@ class CallActivity : ComponentActivity() {
             if(call==null) { releaseProximity();delay(1000);finish() }
             else while(true) { val start=call.details.connectTimeMillis;if(start>0) seconds=((System.currentTimeMillis()-start)/1000).coerceAtLeast(0);delay(1000) }
         }
-        Box(Modifier.fillMaxSize().background(Color(0xFF253542))) {
+        Box(Modifier.fillMaxSize().background(Color(0xFF102B4C))) {
             Photo(person,Modifier.fillMaxSize(),true)
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha=.48f)))
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xA6071A31),Color(0x660B2442),Color(0xE6071A31)))))
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).padding(24.dp).verticalScroll(rememberScrollState()),horizontalAlignment=Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(36.dp))
-                Text(person?.name ?: NumberTools.display(call?.let{CallStore.label(it)} ?: lastNumber).ifBlank{"Неизвестный номер"},fontSize=34.sp,color=Color.White)
+                Text(person?.name ?: NumberTools.display(call?.let{CallStore.label(it)} ?: lastNumber).ifBlank{"Неизвестный номер"},fontSize=32.sp,fontWeight=FontWeight.Bold,color=Color.White)
                 Spacer(Modifier.height(12.dp))
                 Text(call?.details?.accountHandle?.let{Dialing.label(this@CallActivity,it)} ?: "",color=Color.White.copy(alpha=.8f))
                 Text(if(call==null) "Разговор ${NumberTools.duration(seconds)}" else CallStore.state(call),Modifier.padding(top=12.dp),fontSize=22.sp,color=Color.White)
@@ -116,7 +120,7 @@ class CallActivity : ComponentActivity() {
     }
     @Composable private fun Control(label:String,icon:androidx.compose.ui.graphics.vector.ImageVector,active:Boolean=false,action:()->Unit) {
         Column(horizontalAlignment=Alignment.CenterHorizontally) {
-            FilledIconButton(onClick=action,modifier=Modifier.size(64.dp),colors=IconButtonDefaults.filledIconButtonColors(containerColor=if(active)Color.White else Color.White.copy(alpha=.15f),contentColor=if(active)Color.Black else Color.White)){Icon(icon,label)}
+            FilledIconButton(onClick=action,modifier=Modifier.size(64.dp),colors=IconButtonDefaults.filledIconButtonColors(containerColor=if(active)Color(0xFFDCEEFF) else Color(0xCC153E68),contentColor=if(active)Color(0xFF123D70) else Color.White)){Icon(icon,label)}
             Text(label,color=Color.White,fontSize=12.sp,modifier=Modifier.padding(top=6.dp))
         }
     }
