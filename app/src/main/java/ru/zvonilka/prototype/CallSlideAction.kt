@@ -49,7 +49,7 @@ import kotlin.math.roundToInt
                         } finally {busy=false}
                     }
                 }
-            },onDragCancel={if(accepted){scope.launch{animate(offset,0f){v,_->offset=v}}}}) { change,delta->
+            },onDragCancel={if(accepted){busy=true;scope.launch{try{animate(offset,0f){v,_->offset=v}}finally{busy=false}}}}) { change,delta->
                 if(accepted){change.consume();offset=(offset+delta).coerceIn(0f,travel)}
             }
         }) {

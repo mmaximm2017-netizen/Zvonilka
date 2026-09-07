@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
     private var confirmation by mutableStateOf<Pair<String,()->Unit>?>(null)
     private var simRevision by mutableIntStateOf(0)
     private val photoPicker=registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if(uri!=null) lifecycleScope.launch { runCatching { withContext(Dispatchers.IO) { data.photo(uri) } }.onSuccess { photoOriginal=it;cropSource=it }.onFailure { error="Не удалось прочитать фото" } }
+        if(uri!=null) lifecycleScope.launch { runCatching { withContext(Dispatchers.IO) { data.photo(uri) } }.onSuccess { cropSource=it }.onFailure { error="Не удалось прочитать фото" } }
     }
     private val export=registerForActivityResult(ActivityResultContracts.CreateDocument("text/vcard")) { uri ->
         if(uri!=null) work { contentResolver.openOutputStream(uri)?.use { it.write(Vcf.encode(people).toByteArray(Charsets.UTF_8)) } ?: error("Файл недоступен") }
@@ -202,7 +202,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         if(editing) Editor()
-        cropSource?.let { source -> PhotoCropEditor(source,photoPreviewName,onSave={photoDraft=it;changedPhoto=true;cropSource=null},onDismiss={cropSource=null}) }
+        cropSource?.let { source -> PhotoCropEditor(source,photoPreviewName,onSave={photoDraft=it;photoOriginal=source;changedPhoto=true;cropSource=null},onDismiss={cropSource=null}) }
         confirmation?.let { (title,action)->Confirm(title,{confirmation=null}) { confirmation=null;action() } }
         error?.let { message->AlertDialog(onDismissRequest={error=null},title={Text("Звонилка")},text={Text(message)},confirmButton={TextButton(onClick={error=null}){Text("Понятно")}}) }
     }
@@ -375,7 +375,7 @@ class MainActivity : ComponentActivity() {
                     photoPreviewName=name
                     lifecycleScope.launch {
                         runCatching { withContext(Dispatchers.IO) { photoOriginal ?: edit?.id?.takeIf{it>=0}?.let{data.editPhoto(it)} ?: photoDraft } }
-                            .onSuccess { if(it!=null){photoOriginal=it;cropSource=it} }.onFailure{error="Не удалось открыть фото"}
+                            .onSuccess { if(it!=null){cropSource=it} }.onFailure{error="Не удалось открыть фото"}
                     }
                 }) { Text("Настроить кадр звонка") }
                 OutlinedTextField(name,{name=it},label={Text("Имя")},singleLine=true)
