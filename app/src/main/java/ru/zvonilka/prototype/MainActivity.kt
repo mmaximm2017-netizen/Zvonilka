@@ -68,13 +68,16 @@ class MainActivity : ComponentActivity() {
     private var settings by mutableStateOf(false)
     private var edit by mutableStateOf<PersonRecord?>(null)
     private var editing by mutableStateOf(false)
+    private var photoPreviewName by mutableStateOf("")
+    private var cropSource by mutableStateOf<ByteArray?>(null)
+    private var photoOriginal:ByteArray?=null
     private var photoDraft by mutableStateOf<ByteArray?>(null)
     private var changedPhoto by mutableStateOf(false)
     private var selected by mutableStateOf<PersonRecord?>(null)
     private var confirmation by mutableStateOf<Pair<String,()->Unit>?>(null)
     private var simRevision by mutableIntStateOf(0)
     private val photoPicker=registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if(uri!=null) lifecycleScope.launch { runCatching { withContext(Dispatchers.IO) { data.photo(uri) } }.onSuccess { photoDraft=it;changedPhoto=true }.onFailure { error="Не удалось прочитать фото" } }
+        if(uri!=null) lifecycleScope.launch { runCatching { withContext(Dispatchers.IO) { data.photo(uri) } }.onSuccess { photoOriginal=it;cropSource=it }.onFailure { error="Не удалось прочитать фото" } }
     }
     private val export=registerForActivityResult(ActivityResultContracts.CreateDocument("text/vcard")) { uri ->
         if(uri!=null) work { contentResolver.openOutputStream(uri)?.use { it.write(Vcf.encode(people).toByteArray(Charsets.UTF_8)) } ?: error("Файл недоступен") }
@@ -143,7 +146,7 @@ class MainActivity : ComponentActivity() {
         else toast("Разрешения настроены")
     }
     private fun dial(value:String)=Dialing.place(this,value) { setup() }
-    private fun editor(p:PersonRecord?) { edit=p;photoDraft=p?.photo;changedPhoto=false;editing=true }
+    private fun editor(p:PersonRecord?) { edit=p;photoDraft=p?.photo;photoOriginal=null;cropSource=null;changedPhoto=false;editing=true }
     private fun copy(value:String) {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Номер",value));toast("Номер скопирован")
     }
@@ -199,6 +202,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         if(editing) Editor()
+        cropSource?.let { source -> PhotoCropEditor(source,photoPreviewName,onSave={photoDraft=it;changedPhoto=true;cropSource=null},onDismiss={cropSource=null}) }
         confirmation?.let { (title,action)->Confirm(title,{confirmation=null}) { confirmation=null;action() } }
         error?.let { message->AlertDialog(onDismissRequest={error=null},title={Text("Звонилка")},text={Text(message)},confirmButton={TextButton(onClick={error=null}){Text("Понятно")}}) }
     }
@@ -332,7 +336,7 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.size(76.dp).clip(CircleShape).background(Green).combinedClickable(onClick={dial(number)},onLongClick={Dialing.choose(this@MainActivity,number.ifBlank { null }){simRevision++}}),contentAlignment=Alignment.Center) {
                     Icon(Icons.Default.Call,"Позвонить; удерживать для выбора SIM",Modifier.size(32.dp),tint=Color.White)
                 }
-                Text(Dialing.selectedLabel(this@MainActivity,number),Modifier.padding(top=4.dp),style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick={Dialing.choose(this@MainActivity,number.ifBlank{null}){simRevision++}}) { Icon(Icons.Default.SimCard,null,Modifier.size(18.dp));Spacer(Modifier.width(6.dp));Text(Dialing.selectedLabel(this@MainActivity,number),style=MaterialTheme.typography.labelMedium);Icon(Icons.Default.ExpandMore,null,Modifier.size(18.dp)) }
             }
         }
     }
@@ -347,6 +351,8 @@ class MainActivity : ComponentActivity() {
                 FilledTonalIconButton(onClick={editor(p)}){Icon(Icons.Default.Edit,"Редактировать")}
                 Box { FilledTonalIconButton(onClick={menu=true}){Icon(Icons.Default.MoreVert,"Меню")};DropdownMenu(menu,{menu=false}){DropdownMenuItem(text={Text("Удалить контакт")},onClick={menu=false;confirmation="Удалить ${p.name} из памяти телефона?" to { selected=null;work{data.deleteContact(p.id)} }})} }
             }
+            val simState=simRevision
+            TextButton(onClick={Dialing.choose(this@MainActivity,p.primary){simRevision++}},modifier=Modifier.padding(horizontal=16.dp)) { Icon(Icons.Default.SimCard,null);Spacer(Modifier.width(8.dp));Text(Dialing.selectedLabel(this@MainActivity,p.primary));Icon(Icons.Default.ExpandMore,null) }
             p.numbers.forEachIndexed { i,n->TextButton(onClick={
                 android.app.AlertDialog.Builder(this@MainActivity).setTitle(NumberTools.display(n)).setItems(arrayOf("Позвонить","Сделать основным","Скопировать")) { _,action->when(action){0->dial(n);1->work{data.save(p.id,p.name,listOf(n)+p.numbers.filter{it!=n},null,false)};2->copy(n)} }.show()
             }) { Text(NumberTools.display(n)+(if(i==0) " · основной" else "")) } }
@@ -364,7 +370,14 @@ class MainActivity : ComponentActivity() {
         AlertDialog(onDismissRequest={editing=false},title={Text(if(edit==null||edit!!.id<0) "Новый контакт" else "Редактирование")},text={
             Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 Photo(PersonRecord(-1,name,nums,photoDraft),Modifier.size(120.dp).clip(CircleShape))
-                TextButton(onClick={photoPicker.launch("image/*")}) { Text("Выбрать фото") }
+                TextButton(onClick={photoPreviewName=name;photoPicker.launch("image/*")}) { Text("Выбрать фото") }
+                if(photoDraft!=null) TextButton(onClick={
+                    photoPreviewName=name
+                    lifecycleScope.launch {
+                        runCatching { withContext(Dispatchers.IO) { photoOriginal ?: edit?.id?.takeIf{it>=0}?.let{data.editPhoto(it)} ?: photoDraft } }
+                            .onSuccess { if(it!=null){photoOriginal=it;cropSource=it} }.onFailure{error="Не удалось открыть фото"}
+                    }
+                }) { Text("Настроить кадр звонка") }
                 OutlinedTextField(name,{name=it},label={Text("Имя")},singleLine=true)
                 nums.forEachIndexed { i,n->Row(verticalAlignment=Alignment.CenterVertically) {
                     OutlinedTextField(n,{value->nums=nums.toMutableList().also{it[i]=NumberTools.clean(value)}},Modifier.weight(1f),label={Text(if(i==0) "Основной номер" else "Номер")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Phone))
@@ -375,7 +388,7 @@ class MainActivity : ComponentActivity() {
             }
         },confirmButton={TextButton(enabled=!loading && name.isNotBlank() && nums.any{it.isNotBlank()},onClick={
             val id=edit?.id?.takeIf{it>=0};val photo=photoDraft;val change=changedPhoto
-            lifecycleScope.launch { loading=true;runCatching{withContext(Dispatchers.IO){data.save(id,name,nums,photo,change)}}.onSuccess{editing=false}.onFailure{error=it.message};refresh() }
+            lifecycleScope.launch { loading=true;runCatching{withContext(Dispatchers.IO){data.save(id,name,nums,photo,change,photoOriginal)}}.onSuccess{editing=false}.onFailure{error=it.message};refresh() }
         }){Text("Сохранить")}},dismissButton={TextButton(onClick={editing=false}){Text("Отмена")}})
     }
     @Composable private fun Settings() {
@@ -413,7 +426,7 @@ class MainActivity : ComponentActivity() {
                         toast("Диагностика скопирована")
                     }.setNegativeButton("Закрыть",null).show()
             }) { Text("Диагностика звонков") }
-            Button(onClick={Dialing.choose(this@MainActivity,null){simRevision++}}) { Text("SIM по умолчанию") }
+            Button(onClick={Dialing.choose(this@MainActivity,null){simRevision++}}) { Text("SIM по умолчанию: "+Dialing.selectedLabel(this@MainActivity,"")) }
             }
             SectionLabel("КОНТАКТЫ И КОПИИ")
             SettingsGroup {

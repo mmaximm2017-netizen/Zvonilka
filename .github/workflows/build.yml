@@ -23,7 +23,12 @@ jobs:
             cat app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
             exit 1
           }
+      - name: Prepare local signing inputs (no private key in CI)
+        run: |
+          mkdir -p build/delivery
+          cp app/build/outputs/apk/debug/app-debug.apk build/delivery/app-debug.apk
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" build/delivery/apksigner.jar
       - uses: actions/upload-artifact@v4
         with:
-          name: zvonilka-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: zvonilka-signing-input
+          path: build/delivery/

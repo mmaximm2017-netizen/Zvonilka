@@ -48,7 +48,7 @@ class PhoneData(private val context: Context) {
         cr.query(CC.RawContacts.CONTENT_URI,arrayOf(CC.RawContacts._ID),"${CC.RawContacts._ID}=? AND $local",arrayOf(id.toString()),null)?.use { require(it.moveToFirst()) { "Контакт недоступен или принадлежит другому аккаунту" } }
             ?: error("Не удалось проверить контакт")
     }
-    fun save(id: Long?, name: String, numbers: List<String>, photo: ByteArray?, replacePhoto: Boolean): Long {
+    fun save(id: Long?, name: String, numbers: List<String>, photo: ByteArray?, replacePhoto: Boolean, sourcePhoto: ByteArray? = null): Long {
         require(name.isNotBlank()) { "Введите имя" }
         val nums=numbers.map(NumberTools::clean).filter { it.isNotBlank() }.distinctBy(NumberTools::key)
         require(nums.isNotEmpty()) { "Добавьте номер" }
@@ -70,11 +70,14 @@ class PhoneData(private val context: Context) {
             .withValue(CC.Data.IS_PRIMARY,if(index==0) 1 else 0).withValue(CC.Data.IS_SUPER_PRIMARY,if(index==0) 1 else 0).build()) }
         if(photo!=null && (id==null || replacePhoto)) ops.add(row(CC.CommonDataKinds.Photo.CONTENT_ITEM_TYPE).withValue(CC.CommonDataKinds.Photo.PHOTO,photo).build())
         val results=cr.applyBatch(CC.AUTHORITY,ops)
-        return id ?: ContentUris.parseId(requireNotNull(results[0].uri))
+        val savedId=id ?: ContentUris.parseId(requireNotNull(results[0].uri))
+        if(photo!=null && (id==null || replacePhoto)) CallPhotoStore.write(context,savedId,photo,sourcePhoto ?: photo,thumbnail(savedId))
+        return savedId
     }
     fun deleteContact(id:Long) {
         requireLocal(id)
         check(cr.delete(CC.RawContacts.CONTENT_URI,"${CC.RawContacts._ID}=? AND $local",arrayOf(id.toString()))==1) { "Контакт не удалён" }
+        CallPhotoStore.remove(context,id)
     }
     fun history():List<HistoryRecord> {
         if(!allowed(android.Manifest.permission.READ_CALL_LOG)) return emptyList()
@@ -103,6 +106,9 @@ class PhoneData(private val context: Context) {
         if(id < 0 || !allowed(android.Manifest.permission.READ_CONTACTS)) return null
         return try {
             requireLocal(id)
+            CallPhotoStore.read(context,id,thumbnail(id))?.let { bytes ->
+                android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.size)?.let{return it}
+            }
             val uri=Uri.withAppendedPath(ContentUris.withAppendedId(CC.RawContacts.CONTENT_URI,id),CC.RawContacts.DisplayPhoto.CONTENT_DIRECTORY)
             ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr,uri)) { decoder, info, _ ->
                 val scale=minOf(1f,2048f/maxOf(info.size.width,info.size.height))
@@ -114,9 +120,16 @@ class PhoneData(private val context: Context) {
           catch (_: IllegalArgumentException) { null }
           catch (_: IllegalStateException) { null }
     }
+    private fun thumbnail(id:Long):ByteArray? = cr.query(CC.Data.CONTENT_URI,arrayOf(CC.CommonDataKinds.Photo.PHOTO),"${CC.Data.RAW_CONTACT_ID}=? AND ${CC.Data.MIMETYPE}=?",arrayOf(id.toString(),CC.CommonDataKinds.Photo.CONTENT_ITEM_TYPE),null)?.use { if(it.moveToFirst() && !it.isNull(0)) it.getBlob(0) else null }
+    fun editPhoto(id:Long):ByteArray? {
+        requireLocal(id)
+        CallPhotoStore.read(context,id,thumbnail(id),true)?.let{return it}
+        val bitmap=displayPhoto(id) ?: return null
+        return ByteArrayOutputStream().use { out->try{bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG,95,out);out.toByteArray()}finally{bitmap.recycle()} }
+    }
     fun photo(uri:Uri):ByteArray {
         val bitmap=ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr,uri)) { decoder, info, _ ->
-            val scale=minOf(1f,1200f/maxOf(info.size.width,info.size.height))
+            val scale=minOf(1f,2048f/maxOf(info.size.width,info.size.height))
             decoder.setTargetSize((info.size.width*scale).toInt().coerceAtLeast(1),(info.size.height*scale).toInt().coerceAtLeast(1))
             decoder.allocator=ImageDecoder.ALLOCATOR_SOFTWARE
         }

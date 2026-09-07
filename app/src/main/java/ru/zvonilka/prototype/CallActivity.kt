@@ -62,7 +62,7 @@ class CallActivity : ComponentActivity() {
         var lastNumber by remember { mutableStateOf("") }
         var seconds by remember { mutableLongStateOf(0) }
         var keypad by remember { mutableStateOf(false) }
-        val person=call?.let { ContactCache.find(CallStore.label(it)) } ?: lastPerson
+        val person=if(call!=null) ContactCache.find(CallStore.label(call)) else lastPerson
         val audio=CallStore.service?.callAudioState
         LaunchedEffect(key,tick) {
             if(call!=null) { selected=key;lastPerson=ContactCache.find(CallStore.label(call));lastNumber=CallStore.label(call) }
@@ -76,22 +76,27 @@ class CallActivity : ComponentActivity() {
         Box(Modifier.fillMaxSize().background(Color(0xFF102B4C))) {
             Photo(person,Modifier.fillMaxSize(),true)
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xA6071A31),Color(0x660B2442),Color(0xE6071A31)))))
-            Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).padding(24.dp).verticalScroll(rememberScrollState()),horizontalAlignment=Alignment.CenterHorizontally) {
-                Spacer(Modifier.height(36.dp))
+            BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min=maxHeight).padding(horizontal=24.dp,vertical=16.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.SpaceBetween) {
+                Column(horizontalAlignment=Alignment.CenterHorizontally) {
+                Spacer(Modifier.height(16.dp))
                 Text(person?.name ?: NumberTools.display(call?.let{CallStore.label(it)} ?: lastNumber).ifBlank{"Неизвестный номер"},fontSize=32.sp,fontWeight=FontWeight.Bold,color=Color.White)
                 if(person==null) CallerId.text(this@CallActivity,key)?.let { Text(it,Modifier.padding(top=10.dp),fontSize=16.sp,color=Color.White) }
                 Spacer(Modifier.height(12.dp))
                 Text(call?.details?.accountHandle?.let{Dialing.label(this@CallActivity,it)} ?: "",color=Color.White.copy(alpha=.8f))
                 Text(if(call==null) "Разговор ${NumberTools.duration(seconds)}" else CallStore.state(call),Modifier.padding(top=12.dp),fontSize=22.sp,color=Color.White)
                 if(call?.state==Call.STATE_ACTIVE) Text(NumberTools.duration(seconds),color=Color.White,fontSize=22.sp)
-                Spacer(Modifier.height(64.dp))
+                }
+                Column(Modifier.fillMaxWidth().padding(top=24.dp),horizontalAlignment=Alignment.CenterHorizontally) {
                 live.forEach { (id,other)->if(id!=key) TextButton(onClick={selected=id}){Text("${ContactCache.find(CallStore.label(other))?.name ?: CallStore.label(other)} · ${CallStore.state(other)}",color=Color.White)} }
                 if(call?.state==Call.STATE_RINGING) {
-                    Text("Проведите почти до конца вправо",color=Color.White.copy(alpha=.75f),fontSize=14.sp)
-                    Spacer(Modifier.height(16.dp))
-                    SwipeCall(onCall={call.answer(VideoProfile.STATE_AUDIO_ONLY)},onTap={}) { Box(Modifier.fillMaxWidth().background(Green).padding(20.dp),contentAlignment=Alignment.Center){Text("→  Ответить",color=Color.White,fontSize=22.sp)} }
-                    Spacer(Modifier.height(16.dp))
-                    SwipeCall(onCall={call.reject(false,null)},onTap={}) { Box(Modifier.fillMaxWidth().background(Red).padding(20.dp),contentAlignment=Alignment.Center){Text("→  Отклонить",color=Color.White,fontSize=22.sp)} }
+                    Text("Передвиньте ползунок до конца",color=Color.White.copy(alpha=.8f),fontSize=14.sp)
+                    Spacer(Modifier.height(12.dp))
+                    key(key) {
+                        CallSlideAction("Ответить",Green,Icons.Default.Call){call.answer(VideoProfile.STATE_AUDIO_ONLY)}
+                        Spacer(Modifier.height(12.dp))
+                        CallSlideAction("Отклонить",Red,Icons.Default.CallEnd){call.reject(false,null)}
+                    }
                 } else if(call!=null) {
                     if(call.state==Call.STATE_SELECT_PHONE_ACCOUNT) {
                         @Suppress("DEPRECATION")
@@ -116,11 +121,13 @@ class CallActivity : ComponentActivity() {
                         }
                     }
                     if(keypad && call.state==Call.STATE_ACTIVE) listOf("123","456","789","*0#").forEach{line->Row {
-                        line.forEach{ch->Box(Modifier.weight(1f).height(60.dp).pointerInteropFilter { event->when(event.action){android.view.MotionEvent.ACTION_DOWN->{stopTone();toneCall=call;call.playDtmfTone(ch)};android.view.MotionEvent.ACTION_UP,android.view.MotionEvent.ACTION_CANCEL->stopTone()};true },contentAlignment=Alignment.Center){Text(ch.toString(),fontSize=28.sp,color=Color.White)}}
+                        line.forEach{ch->Box(Modifier.weight(1f).height(48.dp).pointerInteropFilter { event->when(event.action){android.view.MotionEvent.ACTION_DOWN->{stopTone();toneCall=call;call.playDtmfTone(ch)};android.view.MotionEvent.ACTION_UP,android.view.MotionEvent.ACTION_CANCEL->stopTone()};true },contentAlignment=Alignment.Center){Text(ch.toString(),fontSize=28.sp,color=Color.White)}}
                     }}
-                    Spacer(Modifier.height(44.dp))
+                    Spacer(Modifier.height(24.dp))
                     FilledIconButton(onClick={call.disconnect()},modifier=Modifier.size(80.dp),colors=IconButtonDefaults.filledIconButtonColors(containerColor=Red,contentColor=Color.White)){Icon(Icons.Default.CallEnd,"Завершить",Modifier.size(34.dp))}
                 }
+                }
+            }
             }
         }
     }

@@ -33,7 +33,7 @@ object CallerId {
             connection.connectTimeout=2500;connection.readTimeout=2500
             connection.instanceFollowRedirects=false
             connection.setRequestProperty("Accept","application/json")
-            connection.setRequestProperty("User-Agent","Zvonilka/0.7 (Android)")
+            connection.setRequestProperty("User-Agent","Zvonilka/0.8 (Android)")
             when(val status=connection.responseCode) {
                 200 -> {
                     val bytes=connection.inputStream.use { it.readBytesBounded(32768) }
