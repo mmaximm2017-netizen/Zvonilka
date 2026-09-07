@@ -34,7 +34,16 @@ class SimContacts(private val c:Context) {
             } ?: error("SIM-книга не предоставлена устройством")
             status=if(out.isEmpty()) "Устройство не предоставило SIM-книгу" else "Доступно SIM-книг: ${out.size}"
             out
-        } catch(_:Exception) {status="SIM-книга недоступна: проверьте разрешения или поддержку устройства";emptyList()}
+        } catch(_:SecurityException) {
+            status="Нет разрешения на чтение SIM-книги"; emptyList()
+        } catch(_:UnsupportedOperationException) {
+            status="Устройство не поддерживает доступ к SIM-книге"; emptyList()
+        } catch(_:IllegalArgumentException) {
+            status="SIM-книга недоступна на этом устройстве"; emptyList()
+        } catch(e:RuntimeException) {
+            CallDiagnostics.record(c,"sim_books_error",e)
+            status="Не удалось получить SIM-книгу"; emptyList()
+        }
     }
     fun read():List<SimSource> {
         if(Build.VERSION.SDK_INT<31)return emptyList()
@@ -44,7 +53,16 @@ class SimContacts(private val c:Context) {
                 cr.query(SR.getContentUri(book.subscription,EF.EF_ADN),arrayOf(SR.RECORD_NUMBER,SR.NAME,SR.PHONE_NUMBER),null,null,null)?.use { cursor->
                     while(cursor.moveToNext()) { val number=cursor.getString(2).orEmpty();if(number.isNotBlank())out.add(SimSource(book,cursor.getInt(0),cursor.getString(1).orEmpty(),number)) }
                 } ?: error("Нет доступа к SIM")
-            } catch(_:Exception) {status="Не удалось прочитать ${book.label}; локальные контакты доступны"}
+            } catch(_:SecurityException) {
+                status="Нет разрешения на чтение ${book.label}; локальные контакты доступны"
+            } catch(_:UnsupportedOperationException) {
+                status="${book.label} не поддерживает чтение телефонной книги; локальные контакты доступны"
+            } catch(_:IllegalArgumentException) {
+                status="Не удалось открыть ${book.label}; локальные контакты доступны"
+            } catch(e:RuntimeException) {
+                CallDiagnostics.record(c,"sim_read_error",e)
+                status="Ошибка чтения ${book.label}; локальные контакты доступны"
+            }
         }
         return out
     }
