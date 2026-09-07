@@ -1,0 +1,64 @@
+from pathlib import Path
+
+p = Path('app/src/main/java/ru/zvonilka/prototype/MainActivity.kt')
+s = p.read_text()
+
+replacements = [
+    (
+        'Row(Modifier.widthIn(max=250.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(3.dp),horizontalArrangement=Arrangement.spacedBy(2.dp))',
+        'Row(Modifier.widthIn(max=210.dp).clip(RoundedCornerShape(11.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(3.dp),horizontalArrangement=Arrangement.spacedBy(2.dp))'
+    ),
+    (
+        'modifier=Modifier.width(if(index==0)92.dp else 130.dp)',
+        'modifier=Modifier.width(if(index==0)76.dp else 112.dp)'
+    ),
+    (
+        'Text(p.name,Modifier.weight(1f,false),style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)',
+        'Text(p.name,Modifier.weight(1f),style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)'
+    ),
+    (
+        'Spacer(Modifier.width(4.dp));Text(simLabel(h.accountId)+" · "+NumberTools.duration(h.seconds),fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)',
+        'Spacer(Modifier.width(5.dp));Text(NumberTools.duration(h.seconds),fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)'
+    ),
+    (
+        'SwipeCall(shape=listRowShape(first,last),enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h})',
+        'SwipeCall(shape=RoundedCornerShape(0.dp),enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h})'
+    ),
+    (
+        '            Spacer(Modifier.weight(1f))\n            listOf("123","456","789","*0#")',
+        '            Spacer(Modifier.height(44.dp))\n            listOf("123","456","789","*0#")'
+    ),
+    (
+        '            Column(Modifier.align(Alignment.CenterHorizontally).padding(top=8.dp,bottom=5.dp),horizontalAlignment=Alignment.CenterHorizontally) {',
+        '            Column(Modifier.align(Alignment.CenterHorizontally).padding(top=8.dp,bottom=2.dp),horizontalAlignment=Alignment.CenterHorizontally) {'
+    ),
+    (
+        '                TextButton(onClick={Dialing.choose(this@MainActivity,number.ifBlank{null}){simRevision++}}) { Icon(Icons.Default.SimCard,null,Modifier.size(17.dp));Spacer(Modifier.width(5.dp));Text(Dialing.selectedLabel(this@MainActivity,number),style=MaterialTheme.typography.labelMedium);Icon(Icons.Default.ExpandMore,null,Modifier.size(17.dp)) }\n            }\n        }',
+        '                TextButton(onClick={Dialing.choose(this@MainActivity,number.ifBlank{null}){simRevision++}}) { Icon(Icons.Default.SimCard,null,Modifier.size(17.dp));Spacer(Modifier.width(5.dp));Text(Dialing.selectedLabel(this@MainActivity,number),style=MaterialTheme.typography.labelMedium);Icon(Icons.Default.ExpandMore,null,Modifier.size(17.dp)) }\n            }\n            Spacer(Modifier.weight(1f))\n        }'
+    ),
+]
+
+for old, new in replacements:
+    if old not in s:
+        raise SystemExit('Missing expected snippet: ' + old[:100])
+    s = s.replace(old, new, 1)
+
+hero = '''            Surface(shape=RoundedCornerShape(22.dp),color=MaterialTheme.colorScheme.primaryContainer,modifier=Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(horizontal=18.dp,vertical=16.dp),verticalAlignment=Alignment.CenterVertically) {
+                    Icon(Icons.Default.Call,null,Modifier.size(30.dp),tint=MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(14.dp));Column { Text("Звонилка",style=MaterialTheme.typography.titleLarge);Text("Всегда на связи",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onPrimaryContainer) }
+                }
+            }
+'''
+if hero not in s:
+    raise SystemExit('Missing settings hero')
+s = s.replace(hero, '', 1)
+p.write_text(s)
+
+g = Path('app/build.gradle.kts')
+b = g.read_text()
+if 'versionCode = 18' not in b or 'versionName = "0.11.0"' not in b:
+    raise SystemExit('Unexpected version')
+b = b.replace('versionCode = 18', 'versionCode = 19', 1)
+b = b.replace('versionName = "0.11.0"', 'versionName = "0.11.1"', 1)
+g.write_text(b)
