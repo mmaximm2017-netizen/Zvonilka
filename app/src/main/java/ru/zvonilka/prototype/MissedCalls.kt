@@ -80,10 +80,12 @@ class SystemMissedReceiver:BroadcastReceiver() {
         // Zero may be our own cancellation acknowledgment; do not erase our unread count.
         if(count<=0)return
         CallDiagnostics.record(c,"system_missed_delegated")
-        if(CallStore.service==null) {
+        if(MissedCalls.count(c)>0) {
+            MissedCalls.clearSystem(c)
+        } else if(CallStore.service==null) {
             // Restore missed calls after a cold start when there was no in-call callback.
             val number=if(count==1)i.getStringExtra(TelecomManager.EXTRA_NOTIFICATION_PHONE_NUMBER).orEmpty() else ""
             MissedCalls.add(c,number,count)
-        } else if(MissedCalls.count(c)>0)MissedCalls.clearSystem(c)
+        }
     }
 }
