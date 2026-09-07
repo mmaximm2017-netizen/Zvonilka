@@ -99,13 +99,8 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         // Notification errors must not abort Telecom callbacks or opening the call UI.
         try {
         if(previousState != null && (previousState == Call.STATE_RINGING) != ringing) manager.cancel(id)
-        val open = PendingIntent.getActivity(this, id, Intent(this, CallActivity::class.java).apply {
-            putExtra("call_id", key)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        fun action(name: String): PendingIntent = if(name=="answer") PendingIntent.getActivity(this,id,
-            Intent(this,CallActivity::class.java).setAction("answer").putExtra("call_id",key).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val open = CallScreenAccess.pending(this,id,key)
+        fun action(name: String): PendingIntent = if(name=="answer") CallScreenAccess.pending(this,id,key,true)
             else PendingIntent.getBroadcast(this, id,
             Intent(this, CallActionReceiver::class.java).setAction(name).putExtra("call_id", key),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -114,6 +109,10 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
             .setContentTitle(ContactCache.find(CallStore.label(call))?.name ?: CallStore.label(call)).setContentText(CallerId.text(this,key)?.let { CallStore.state(call)+" · "+it } ?: CallStore.state(call))
             .setCategory(Notification.CATEGORY_CALL).setOngoing(true).setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(open)
+            .setPublicVersion(Notification.Builder(this,if(ringing) "calls" else "ongoing")
+                .setSmallIcon(android.R.drawable.sym_action_call).setContentTitle("Звонилка")
+                .setContentText(if(ringing) "Входящий вызов" else "Текущий разговор")
+                .setCategory(Notification.CATEGORY_CALL).setContentIntent(open).build())
         if (ringing) builder.setFullScreenIntent(open, true)
         if (Build.VERSION.SDK_INT >= 31) {
             val person = Person.Builder().setName(ContactCache.find(CallStore.label(call))?.name ?: CallStore.label(call)).setImportant(true).build()
@@ -128,6 +127,15 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         }
         } catch (error: RuntimeException) {
             CallDiagnostics.record(this, "notification_error", error)
+        }
+        if(ringing && previousState!=Call.STATE_RINGING) {
+            val locked=getSystemService(KeyguardManager::class.java).isKeyguardLocked
+            val interactive=getSystemService(android.os.PowerManager::class.java).isInteractive
+            val allowed=CallScreenAccess.issue(this)==null
+            CallDiagnostics.record(this,"incoming_screen locked=$locked interactive=$interactive allowed=$allowed")
+            // Telecom-bound InCallService may launch its UI. Respect notification/FSI settings,
+            // launch once per ringing transition, never steal focus on an unlocked screen.
+            if(allowed && (locked || !interactive)) showCall(key)
         }
         // Notification cleanup/update must not depend on the activity rendering successfully.
         CallStore.changed()

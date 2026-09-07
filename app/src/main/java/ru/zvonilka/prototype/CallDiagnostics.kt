@@ -18,13 +18,16 @@ object CallDiagnostics {
         }
     }
     fun report(c: Context): String = buildString {
-        appendLine("Звонилка 0.9 · Android ${android.os.Build.VERSION.SDK_INT} · ${android.os.Build.MODEL}")
+        appendLine("Звонилка 0.9.1 · Android ${android.os.Build.VERSION.SDK_INT} · ${android.os.Build.MODEL}")
         appendLine("Роль: " + c.getSystemService(android.app.role.RoleManager::class.java).isRoleHeld(android.app.role.RoleManager.ROLE_DIALER))
         appendLine("Telecom default: " + c.getSystemService(android.telecom.TelecomManager::class.java).defaultDialerPackage)
         appendLine("Служба в процессе: ${CallStore.service != null}; вызовов: ${CallStore.liveCalls().size}")
         val manager=c.getSystemService(android.app.NotificationManager::class.java)
         appendLine("Уведомления: ${manager.areNotificationsEnabled()}")
         if(android.os.Build.VERSION.SDK_INT>=34) appendLine("Полный экран: ${manager.canUseFullScreenIntent()}")
+        appendLine("Канал входящих: ${manager.getNotificationChannel("calls")?.importance}")
+        appendLine("Экран заблокирован: ${c.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked}")
+        appendLine("Экран включён: ${c.getSystemService(android.os.PowerManager::class.java).isInteractive}")
         if(android.os.Build.VERSION.SDK_INT>=30) runCatching {
             c.getSystemService(android.app.ActivityManager::class.java).getHistoricalProcessExitReasons(null,0,3).forEach {
                 appendLine("Завершение процесса: reason=${it.reason}, status=${it.status}, time=${it.timestamp}")

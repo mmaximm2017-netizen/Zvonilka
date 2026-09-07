@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
     private var changedPhoto by mutableStateOf(false)
     private var selected by mutableStateOf<PersonRecord?>(null)
     private var confirmation by mutableStateOf<Pair<String,()->Unit>?>(null)
+    private var callScreenIssue by mutableStateOf<String?>(null)
     private var simRevision by mutableIntStateOf(0)
     private val photoPicker=registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if(uri!=null) lifecycleScope.launch { runCatching { withContext(Dispatchers.IO) { data.photo(uri) } }.onSuccess { cropSource=it }.onFailure { error="Не удалось прочитать фото" } }
@@ -112,7 +113,7 @@ class MainActivity : ComponentActivity() {
         if(intent.action==Intent.ACTION_DIAL) { tab=2;number=NumberTools.clean(intent.data?.schemeSpecificPart.orEmpty()) }
     }
     override fun onSaveInstanceState(outState:Bundle) { outState.putString("number",number);outState.putInt("tab",tab);outState.putBoolean("settings",settings);outState.putLongArray("pendingDelete",pendingDelete.toLongArray());super.onSaveInstanceState(outState) }
-    override fun onResume() { super.onResume();refresh() }
+    override fun onResume() { super.onResume();callScreenIssue=CallScreenAccess.issue(this);refresh() }
     private fun refresh() {
         lifecycleScope.launch {
             loading=true
@@ -168,6 +169,7 @@ class MainActivity : ComponentActivity() {
             Column(Modifier.padding(padding).fillMaxSize()) {
                 if(loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if(!data.allowed(Manifest.permission.READ_CONTACTS) || !data.allowed(Manifest.permission.CALL_PHONE)) TextButton(onClick={setup()}) { Text("Настроить звонки и доступ к данным") }
+                if(!settings) callScreenIssue?.let { message->TextButton(onClick={CallScreenAccess.openSettings(this@MainActivity)}) { Icon(Icons.Default.NotificationsActive,null);Spacer(Modifier.width(8.dp));Text(message) } }
                 when {
                     settings -> Settings()
                     selected!=null -> ContactCard(selected!!)
@@ -418,6 +420,8 @@ class MainActivity : ComponentActivity() {
             Text(if(getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_DIALER)) "Телефон по умолчанию: Звонилка" else "Звонилка не назначена по умолчанию")
             Text("Контакты: "+if(data.allowed(Manifest.permission.READ_CONTACTS)) "разрешены" else "нет доступа")
             Text("История: "+if(data.allowed(Manifest.permission.READ_CALL_LOG)) "разрешена" else "нет доступа")
+            Text(callScreenIssue ?: "Полноэкранные входящие вызовы разрешены")
+            TextButton(onClick={CallScreenAccess.openSettings(this@MainActivity)}) { Text("Показ вызова на заблокированном экране") }
             Button(onClick={
                 val report=CallDiagnostics.report(this@MainActivity)
                 android.app.AlertDialog.Builder(this@MainActivity).setTitle("Диагностика звонков")
