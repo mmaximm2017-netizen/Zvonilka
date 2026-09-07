@@ -10,12 +10,13 @@ import java.text.Collator
 import java.util.Locale
 
 // A record belongs to one local RawContact, never to an aggregated cloud contact.
-data class PersonRecord(val id: Long, val name: String, val numbers: List<String>, val photo: ByteArray? = null) {
+data class PersonRecord(val id: Long, val name: String, val numbers: List<String>, val photo: ByteArray? = null, val simSources:List<SimSource> = emptyList()) {
     val primary get() = numbers.firstOrNull().orEmpty()
 }
 data class HistoryRecord(val id: Long, val number: String, val type: Int, val date: Long, val seconds: Long, val accountId: String?)
 
 class PhoneData(private val context: Context) {
+    val sim=SimContacts(context)
     private val cr get() = context.contentResolver
     private val local = "(${CC.RawContacts.ACCOUNT_TYPE} IS NULL OR ${CC.RawContacts.ACCOUNT_TYPE} = 'vnd.sec.contact.phone') AND ${CC.RawContacts.DELETED} = 0"
     fun allowed(permission: String) = context.checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -42,7 +43,7 @@ class PhoneData(private val context: Context) {
             map.forEach { (id,a) -> result.add(PersonRecord(id,a.name.ifBlank { "Без имени" },a.nums.sortedByDescending { it.first }.map { it.second }.distinctBy(NumberTools::key),a.photo)) }
         }
         val collator=Collator.getInstance(Locale("ru"))
-        return result.sortedWith { a,b -> collator.compare(a.name,b.name) }
+        return SimMerge.merge(result,sim.read()).sortedWith { a,b -> collator.compare(a.name,b.name) }
     }
     private fun requireLocal(id: Long) {
         cr.query(CC.RawContacts.CONTENT_URI,arrayOf(CC.RawContacts._ID),"${CC.RawContacts._ID}=? AND $local",arrayOf(id.toString()),null)?.use { require(it.moveToFirst()) { "Контакт недоступен или принадлежит другому аккаунту" } }
@@ -126,6 +127,33 @@ class PhoneData(private val context: Context) {
         CallPhotoStore.read(context,id,thumbnail(id),true)?.let{return it}
         val bitmap=displayPhoto(id) ?: return null
         return ByteArrayOutputStream().use { out->try{bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG,95,out);out.toByteArray()}finally{bitmap.recycle()} }
+    }
+    fun exportContacts(people:List<PersonRecord>):List<PersonRecord> {
+        var total=0
+        return people.filter{it.id>=0}.map { p->
+            val full=displayPhoto(p.id)
+            val bytes=if(full!=null) try { compactPhoto(full) } finally {full.recycle()} else p.photo
+            total+=bytes?.size ?: 0
+            require(total<=Vcf.MAX_PHOTOS){"Фотографии превышают лимит одного VCF (12 МБ)"}
+            p.copy(photo=bytes,simSources=emptyList())
+        }
+    }
+    private fun compactPhoto(bitmap:android.graphics.Bitmap):ByteArray {
+        val scale=minOf(1f,720f/maxOf(bitmap.width,bitmap.height))
+        val resized=android.graphics.Bitmap.createScaledBitmap(bitmap,(bitmap.width*scale).toInt().coerceAtLeast(1),(bitmap.height*scale).toInt().coerceAtLeast(1),true)
+        return try {
+            var quality=85;var bytes:ByteArray
+            do {bytes=ByteArrayOutputStream().use{out->resized.compress(android.graphics.Bitmap.CompressFormat.JPEG,quality,out);out.toByteArray()};quality-=10}while(bytes.size>500000 && quality>=15)
+            require(bytes.size<=500000){"Не удалось уменьшить фото"};bytes
+        } finally {if(resized!==bitmap)resized.recycle()}
+    }
+    fun importPhoto(bytes:ByteArray):ByteArray {
+        val bounds=android.graphics.BitmapFactory.Options().apply{inJustDecodeBounds=true}
+        android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
+        require(bounds.outWidth>0 && bounds.outHeight>0 && bounds.outWidth.toLong()*bounds.outHeight<=50_000_000){"Повреждённое или слишком большое фото VCF"}
+        val options=android.graphics.BitmapFactory.Options();while(maxOf(bounds.outWidth,bounds.outHeight)/options.inSampleSize.coerceAtLeast(1)>1440) options.inSampleSize=options.inSampleSize.coerceAtLeast(1)*2
+        val bitmap=android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.size,options) ?: error("Не удалось прочитать фото VCF")
+        return try{compactPhoto(bitmap)}finally{bitmap.recycle()}
     }
     fun photo(uri:Uri):ByteArray {
         val bitmap=ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr,uri)) { decoder, info, _ ->

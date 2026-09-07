@@ -6,6 +6,7 @@ import java.util.UUID
 
 /** Telecom owns calls; only retain them for the lifetime of its bound service. */
 object CallStore {
+    val endedSeconds=linkedMapOf<String,Long>()
     val calls = linkedMapOf<String, Call>()
     val listeners = linkedSetOf<() -> Unit>()
     var service: InCallService? = null

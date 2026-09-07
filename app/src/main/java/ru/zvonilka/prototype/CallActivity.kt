@@ -62,12 +62,13 @@ class CallActivity : ComponentActivity() {
         val call=live[key]
         var lastPerson by remember { mutableStateOf<PersonRecord?>(null) }
         var lastNumber by remember { mutableStateOf("") }
-        var seconds by remember(key) { mutableLongStateOf(0) }
+        var seconds by remember { mutableLongStateOf(0) }
+        var lastCallKey by remember {mutableStateOf<String?>(null)}
         var keypad by remember(key) { mutableStateOf(false) }
         val person=if(call!=null) ContactCache.find(CallStore.label(call)) else lastPerson
         val audio=CallStore.service?.callAudioState
         LaunchedEffect(key,tick) {
-            if(call!=null) { selected=key;lastPerson=ContactCache.find(CallStore.label(call));lastNumber=CallStore.label(call) }
+            if(call!=null) {if(lastCallKey!=key)seconds=0;lastCallKey=key; selected=key;lastPerson=ContactCache.find(CallStore.label(call));lastNumber=CallStore.label(call) }
             val use=call?.state==Call.STATE_ACTIVE && audio?.route==CallAudioState.ROUTE_EARPIECE
             if(use && proximity?.isHeld==false) proximity?.acquire(2*60*60*1000L) else if(!use) releaseProximity()
         }
@@ -89,7 +90,7 @@ class CallActivity : ComponentActivity() {
                         Spacer(Modifier.height(14.dp))
                         Text(person?.name ?: NumberTools.display(call?.let{CallStore.label(it)} ?: lastNumber).ifBlank{"Неизвестный номер"},modifier=Modifier.fillMaxWidth(),fontSize=34.sp,lineHeight=39.sp,fontWeight=FontWeight.Normal,color=white,textAlign=TextAlign.Center)
                         val status=when {
-                            call==null -> "Вызов завершён"
+                            call==null -> "Разговор ${NumberTools.duration(CallStore.endedSeconds[lastCallKey] ?: seconds)}"
                             call.state==Call.STATE_ACTIVE -> NumberTools.duration(seconds)
                             ringing -> "Входящий вызов"
                             else -> CallStore.state(call)

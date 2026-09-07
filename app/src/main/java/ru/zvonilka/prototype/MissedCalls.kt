@@ -7,6 +7,7 @@ import android.os.Build
 import android.telecom.TelecomManager
 
 object MissedCalls {
+    fun count(c:Context)=c.getSharedPreferences("missed",0).all.values.filterIsInstance<Int>().sum()
     fun add(c:Context,number:String) {
         val key=NumberTools.key(number).ifBlank { "hidden" }
         val prefs=c.getSharedPreferences("missed",0)

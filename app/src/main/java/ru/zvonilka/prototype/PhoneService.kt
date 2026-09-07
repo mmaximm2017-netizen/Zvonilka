@@ -155,6 +155,11 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
     override fun onBringToForeground(showDialpad: Boolean) = showCall()
     override fun onCallAudioStateChanged(audioState: CallAudioState?) { CallStore.changed() }
     private fun removeCall(call: Call) {
+        if(call in ids) CallStore.calls.filterValues{it===call}.keys.forEach { key->
+            val start=call.details.connectTimeMillis
+            CallStore.endedSeconds[key]=if(start>0)((System.currentTimeMillis()-start)/1000).coerceAtLeast(0) else 0
+            while(CallStore.endedSeconds.size>8)CallStore.endedSeconds.remove(CallStore.endedSeconds.keys.first())
+        }
         if(call in ids) CallDiagnostics.record(this, "call_removed state=${call.state}")
         if(call.details.disconnectCause.code==DisconnectCause.MISSED && seenEnded.add(call)) MissedCalls.add(this,call.details.handle?.schemeSpecificPart.orEmpty())
         ids.remove(call)?.let { manager.cancel(it) }

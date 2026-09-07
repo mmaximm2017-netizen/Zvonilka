@@ -75,23 +75,31 @@ class MainActivity : ComponentActivity() {
     private var changedPhoto by mutableStateOf(false)
     private var selected by mutableStateOf<PersonRecord?>(null)
     private var confirmation by mutableStateOf<Pair<String,()->Unit>?>(null)
+    private var simEditing by mutableStateOf<Pair<SimBook,SimSource?>?>(null)
+    private var simStatus by mutableStateOf("")
+    private var missedCount by mutableIntStateOf(0)
+    private val missedListener=android.content.SharedPreferences.OnSharedPreferenceChangeListener { _,_->missedCount=MissedCalls.count(this) }
     private var callScreenIssue by mutableStateOf<String?>(null)
     private var simRevision by mutableIntStateOf(0)
     private val photoPicker=registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if(uri!=null) lifecycleScope.launch { runCatching { withContext(Dispatchers.IO) { data.photo(uri) } }.onSuccess { cropSource=it }.onFailure { error="Не удалось прочитать фото" } }
     }
     private val export=registerForActivityResult(ActivityResultContracts.CreateDocument("text/vcard")) { uri ->
-        if(uri!=null) work { contentResolver.openOutputStream(uri)?.use { it.write(Vcf.encode(people).toByteArray(Charsets.UTF_8)) } ?: error("Файл недоступен") }
+        if(uri!=null) work { val bytes=Vcf.encode(data.exportContacts(people)).toByteArray(Charsets.UTF_8);contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("Файл недоступен") }
     }
     private val importFile=registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if(uri!=null) lifecycleScope.launch {
             runCatching { withContext(Dispatchers.IO) { contentResolver.openInputStream(uri)?.use { input ->
                 val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
-                while(true) { val n=input.read(buffer);if(n<0) break;require(out.size()+n<=5_000_000){"Файл больше 5 МБ"};out.write(buffer,0,n) }
-                Vcf.decode(out.toByteArray().toString(Charsets.UTF_8))
+                while(true) { val n=input.read(buffer);if(n<0) break;require(out.size()+n<=32_000_000){"Файл больше 32 МБ"};out.write(buffer,0,n) }
+                var photoBytes=0
+                Vcf.decode(out.toByteArray().toString(Charsets.UTF_8)).map { p->val photo=p.photo?.let(data::importPhoto);photoBytes+=photo?.size ?: 0;require(photoBytes<=Vcf.MAX_PHOTOS){"В VCF слишком много фотографий"};p.copy(photo=photo) }
             } ?: error("Файл недоступен") } }.onSuccess { entries ->
-                confirmation="Добавить ${entries.size} контактов в память телефона? Существующие не заменяются." to {
-                    work { var added=0; try { entries.forEach { data.save(null,it.name,it.numbers,null,false);added++ } } catch(e:Exception) { error("Добавлено $added из ${entries.size}. ${e.message}") } }
+                val existing=people.filter{it.id>=0}.map(Vcf::contactKey).toSet()
+                val fresh=entries.distinctBy(Vcf::contactKey).filter{Vcf.contactKey(it) !in existing}
+                if(fresh.isEmpty()){toast("Все контакты уже есть в телефоне");return@onSuccess}
+                confirmation="Добавить ${fresh.size} контактов с фото в память телефона? Пропущено совпадений: ${entries.size-fresh.size}. Существующие не заменяются." to {
+                    work { var added=0; try { fresh.forEach { data.save(null,it.name,it.numbers,it.photo,it.photo!=null);added++ } } catch(e:Exception) { error("Добавлено $added из ${fresh.size}. ${e.message}") } }
                 }
             }.onFailure { error=it.message }
         }
@@ -113,12 +121,14 @@ class MainActivity : ComponentActivity() {
         if(intent.action==Intent.ACTION_DIAL) { tab=2;number=NumberTools.clean(intent.data?.schemeSpecificPart.orEmpty()) }
     }
     override fun onSaveInstanceState(outState:Bundle) { outState.putString("number",number);outState.putInt("tab",tab);outState.putBoolean("settings",settings);outState.putLongArray("pendingDelete",pendingDelete.toLongArray());super.onSaveInstanceState(outState) }
+    override fun onStart() {super.onStart();getSharedPreferences("missed",0).registerOnSharedPreferenceChangeListener(missedListener);missedCount=MissedCalls.count(this)}
+    override fun onStop() {getSharedPreferences("missed",0).unregisterOnSharedPreferenceChangeListener(missedListener);super.onStop()}
     override fun onResume() { super.onResume();callScreenIssue=CallScreenAccess.issue(this);refresh() }
     private fun refresh() {
         lifecycleScope.launch {
             loading=true
             runCatching { withContext(Dispatchers.IO) { data.contacts() to data.history() } }
-                .onSuccess { (p,h)-> people=p;ContactCache.people=p;history=h;selected=selected?.let { old->p.find { it.id==old.id } } }
+                .onSuccess { (p,h)-> people=p;simStatus=data.sim.status;ContactCache.people=p;history=h;selected=selected?.let { old->p.find { it.id==old.id } } }
                 .onFailure { error="Не удалось загрузить данные: ${it.message}" }
             loading=false
             if(tab==0) MissedCalls.clear(this@MainActivity)
@@ -147,7 +157,42 @@ class MainActivity : ComponentActivity() {
         else toast("Разрешения настроены")
     }
     private fun dial(value:String)=Dialing.place(this,value) { setup() }
-    private fun editor(p:PersonRecord?) { edit=p;photoDraft=p?.photo;photoOriginal=null;cropSource=null;changedPhoto=false;editing=true }
+    private fun editorLocal(p:PersonRecord?) { edit=p;photoDraft=p?.photo;photoOriginal=null;cropSource=null;changedPhoto=false;editing=true }
+    private fun editor(p:PersonRecord?) {
+        if(p==null) {
+            lifecycleScope.launch {
+                val books=withContext(Dispatchers.IO){data.sim.books()}
+                if(books.isEmpty()) editorLocal(null)
+                else android.app.AlertDialog.Builder(this@MainActivity).setTitle("Где сохранить контакт?")
+                    .setItems((listOf("Телефон")+books.map{it.label}).toTypedArray()){_,i->if(i==0)editorLocal(null) else simEditing=books[i-1] to null}.setNegativeButton("Отмена",null).show()
+            };return
+        }
+        if(p.simSources.isEmpty()) {editorLocal(p);return}
+        val local=p.id>=0
+        val labels=(if(local)listOf("Телефон")else emptyList())+p.simSources.map{it.book.label+" · "+it.name}
+        android.app.AlertDialog.Builder(this).setTitle("Какую запись изменить?").setItems(labels.toTypedArray()){_,i->
+            if(local && i==0)editorLocal(p) else p.simSources[i-(if(local)1 else 0)].let{simEditing=it.book to it}
+        }.setNegativeButton("Отмена",null).show()
+    }
+    private fun deletePerson(p:PersonRecord) {
+        fun local(){confirmation="Удалить ${p.name} из памяти телефона?" to {selected=null;work{data.deleteContact(p.id)}}}
+        fun sim(source:SimSource){confirmation="Удалить ${source.name} с ${source.book.label}?" to {selected=null;work{data.sim.delete(source)}}}
+        if(p.simSources.isEmpty()){local();return}
+        val hasLocal=p.id>=0
+        val labels=(if(hasLocal)listOf("Телефон")else emptyList())+p.simSources.map{it.book.label+" · "+it.name}
+        android.app.AlertDialog.Builder(this).setTitle("Какую запись удалить?").setItems(labels.toTypedArray()){_,i->if(hasLocal && i==0)local() else sim(p.simSources[i-(if(hasLocal)1 else 0)])}.setNegativeButton("Отмена",null).show()
+    }
+    @Composable private fun SimEditor(book:SimBook,source:SimSource?) {
+        var name by remember(book,source){mutableStateOf(source?.name.orEmpty())}
+        var num by remember(book,source){mutableStateOf(source?.number.orEmpty())}
+        AlertDialog(onDismissRequest={if(!loading)simEditing=null},title={Text(book.label+" · контакт")},text={Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Text("На SIM сохраняются имя и один номер. Фото хранится только в телефоне.")
+            OutlinedTextField(name,{name=it},label={Text("Имя")},enabled=!loading)
+            OutlinedTextField(num,{num=NumberTools.clean(it)},label={Text("Номер")},enabled=!loading,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Phone))
+        }},confirmButton={TextButton(enabled=!loading && name.isNotBlank() && num.isNotBlank(),onClick={
+            lifecycleScope.launch {loading=true;runCatching{withContext(Dispatchers.IO){data.sim.save(book,source,name.trim(),num)}}.onSuccess{simEditing=null}.onFailure{error=it.message ?: "SIM не сохранила контакт"};refresh()}
+        }){Text("Сохранить")}},dismissButton={TextButton(enabled=!loading,onClick={simEditing=null}){Text("Отмена")}})
+    }
     private fun copy(value:String) {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Номер",value));toast("Номер скопирован")
     }
@@ -163,7 +208,7 @@ class MainActivity : ComponentActivity() {
                 IconButton(onClick={settings=!settings}) { Icon(Icons.Outlined.Settings,"Настройки") }
             }) },bottomBar={ if(!settings && selected==null) NavigationBar(containerColor=MaterialTheme.colorScheme.surface,tonalElevation=0.dp) {
                 listOf(Icons.Outlined.History,Icons.Outlined.Contacts,Icons.Outlined.Dialpad).forEachIndexed { i,icon->
-                    NavigationBarItem(colors=NavigationBarItemDefaults.colors(indicatorColor=Color.Transparent,selectedIconColor=MaterialTheme.colorScheme.primary,selectedTextColor=MaterialTheme.colorScheme.primary),selected=tab==i,onClick={tab=i;if(i==0) MissedCalls.clear(this@MainActivity)},icon={Icon(icon,null,Modifier.size(24.dp))},label={Text(listOf("Недавние","Контакты","Клавиши")[i],fontSize=11.sp,fontWeight=FontWeight.Normal)})
+                    NavigationBarItem(colors=NavigationBarItemDefaults.colors(indicatorColor=Color.Transparent,selectedIconColor=MaterialTheme.colorScheme.primary,selectedTextColor=MaterialTheme.colorScheme.primary),selected=tab==i,onClick={tab=i;if(i==0) MissedCalls.clear(this@MainActivity)},icon={BadgedBox(badge={if(i==0 && missedCount>0)Badge{Text(if(missedCount>99)"99+" else missedCount.toString())}}){Icon(icon,null,Modifier.size(24.dp))}},label={Text(listOf("Недавние","Контакты","Клавиши")[i],fontSize=11.sp,fontWeight=FontWeight.Normal)})
                 }
             } }) { padding->
             Column(Modifier.padding(padding).fillMaxSize()) {
@@ -204,6 +249,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         if(editing) Editor()
+        simEditing?.let{(book,source)->SimEditor(book,source)}
         cropSource?.let { source -> PhotoCropEditor(source,photoPreviewName,onSave={photoDraft=it;photoOriginal=source;changedPhoto=true;cropSource=null},onDismiss={cropSource=null}) }
         confirmation?.let { (title,action)->Confirm(title,{confirmation=null}) { confirmation=null;action() } }
         error?.let { message->AlertDialog(onDismissRequest={error=null},title={Text("Звонилка")},text={Text(message)},confirmButton={TextButton(onClick={error=null}){Text("Понятно")}}) }
@@ -211,7 +257,9 @@ class MainActivity : ComponentActivity() {
     @Composable private fun PersonRow(p:PersonRecord,number:String=p.primary) {
         Row(Modifier.fillMaxWidth().padding(horizontal=14.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
             Photo(p,Modifier.size(42.dp).clip(CircleShape));Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) { Text(p.name,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis);Spacer(Modifier.height(3.dp));Text(NumberTools.display(number),fontSize=13.sp,letterSpacing=0.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+            Column(Modifier.weight(1f)) {
+                if(p.simSources.isNotEmpty()) Row(verticalAlignment=Alignment.CenterVertically){Icon(Icons.Default.SimCard,null,Modifier.size(12.dp));Text(p.simSources.map{it.book.label}.distinct().joinToString(),fontSize=10.sp)}
+                Text(p.name,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis);Spacer(Modifier.height(3.dp));Text(NumberTools.display(number),fontSize=13.sp,letterSpacing=0.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
     @Composable private fun HistoryList(rows:List<HistoryRecord>) {
@@ -351,12 +399,13 @@ class MainActivity : ComponentActivity() {
                 FilledTonalIconButton(onClick={try { startActivity(Intent(Intent.ACTION_SENDTO,Uri.fromParts("smsto",p.primary,null))) } catch(_:ActivityNotFoundException){toast("Приложение SMS недоступно")}}){Icon(Icons.Default.Sms,"SMS")}
                 FilledTonalIconButton(onClick={copy(p.primary)}){Icon(Icons.Default.ContentCopy,"Скопировать")}
                 FilledTonalIconButton(onClick={editor(p)}){Icon(Icons.Default.Edit,"Редактировать")}
-                Box { FilledTonalIconButton(onClick={menu=true}){Icon(Icons.Default.MoreVert,"Меню")};DropdownMenu(menu,{menu=false}){DropdownMenuItem(text={Text("Удалить контакт")},onClick={menu=false;confirmation="Удалить ${p.name} из памяти телефона?" to { selected=null;work{data.deleteContact(p.id)} }})} }
+                Box { FilledTonalIconButton(onClick={menu=true}){Icon(Icons.Default.MoreVert,"Меню")};DropdownMenu(menu,{menu=false}){DropdownMenuItem(text={Text("Удалить контакт")},onClick={menu=false;deletePerson(p)})} }
             }
+            if(p.simSources.isNotEmpty()) Text("Источники: "+(if(p.id>=0)"Телефон · " else "")+p.simSources.joinToString{it.book.label},Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.bodySmall)
             val simState=simRevision
             TextButton(onClick={Dialing.choose(this@MainActivity,p.primary){simRevision++}},modifier=Modifier.padding(horizontal=16.dp)) { Icon(Icons.Default.SimCard,null);Spacer(Modifier.width(8.dp));Text(Dialing.selectedLabel(this@MainActivity,p.primary));Icon(Icons.Default.ExpandMore,null) }
             p.numbers.forEachIndexed { i,n->TextButton(onClick={
-                android.app.AlertDialog.Builder(this@MainActivity).setTitle(NumberTools.display(n)).setItems(arrayOf("Позвонить","Сделать основным","Скопировать")) { _,action->when(action){0->dial(n);1->work{data.save(p.id,p.name,listOf(n)+p.numbers.filter{it!=n},null,false)};2->copy(n)} }.show()
+                android.app.AlertDialog.Builder(this@MainActivity).setTitle(NumberTools.display(n)).setItems(arrayOf("Позвонить","Сделать основным","Скопировать")) { _,action->when(action){0->dial(n);1->if(p.id>=0)work{data.save(p.id,p.name,listOf(n)+p.numbers.filter{it!=n},null,false)} else toast("На SIM хранится один номер");2->copy(n)} }.show()
             }) { Text(NumberTools.display(n)+(if(i==0) " · основной" else "")) } }
             Text("История",Modifier.padding(16.dp),style=MaterialTheme.typography.titleLarge)
             // Non-nested lazy list: the card owns the scroll.
@@ -447,7 +496,7 @@ class MainActivity : ComponentActivity() {
             Text("При включении неизвестный входящий номер передаётся PhoneBlock через интернет. Контакты и журнал не загружаются. Звонки не блокируются.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Это проверка по жалобам пользователей, а не подтверждение личности. Названия организаций не определяются. Полнота базы российских номеров не проверена.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick={startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://phoneblock.net/phoneblock/")))}) { Text("О сервисе PhoneBlock") }
-            Text("SIM-контакты и еженедельные копии пока не включены.",color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(simStatus.ifBlank{"SIM-книга ещё не проверена"},color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
