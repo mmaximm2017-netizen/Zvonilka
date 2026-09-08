@@ -11,6 +11,12 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.AbsoluteRoundedCornerShape
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
@@ -106,15 +112,28 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
     }
 }
 @OptIn(ExperimentalFoundationApi::class)
-@Composable fun SwipeCall(modifier:Modifier=Modifier,onCall:()->Unit,onTap:()->Unit,onLong:()->Unit={},enabled:Boolean=true,shape:androidx.compose.ui.graphics.Shape=RoundedCornerShape(20.dp),containerColor:Color=MaterialTheme.colorScheme.surface,content:@Composable ()->Unit) {
+@Composable fun SwipeCall(modifier:Modifier=Modifier,onCall:()->Unit,onTap:()->Unit,onLong:()->Unit={},enabled:Boolean=true,shape:androidx.compose.ui.graphics.Shape=RoundedCornerShape(20.dp),containerColor:Color=MaterialTheme.colorScheme.surface,glassBackdrop:Backdrop?=null,greenGlass:Boolean=false,content:@Composable ()->Unit) {
     var offset by remember { mutableFloatStateOf(0f) }; val scope=rememberCoroutineScope(); var width by remember { mutableIntStateOf(1) }
     var settleJob by remember { mutableStateOf<Job?>(null) }
     val view=LocalView.current
     val call by rememberUpdatedState(onCall)
     val dragState=rememberDraggableState { delta->if(enabled) offset=(offset+delta).coerceIn(0f,width.toFloat()) }
     Box(modifier.clip(shape).onSizeChanged { width=it.width }) {
-        Box(Modifier.matchParentSize().background(if(offset>0f) Ocean else containerColor)) {
-            if(offset>0f) Icon(Icons.Default.Call,null,Modifier.align(Alignment.CenterStart).padding(start=24.dp),tint=Color.White)
+        val reveal=if(offset>0f) (offset/width.toFloat()).coerceIn(0f,1f) else 0f
+        val glassShape=AbsoluteRoundedCornerShape(18.dp)
+        val revealModifier=if(glassBackdrop!=null && greenGlass) {
+            Modifier.matchParentSize().drawBackdrop(
+                backdrop=glassBackdrop,
+                shape={glassShape},
+                effects={vibrancy();blur(9.dp.toPx());lens(14.dp.toPx(),10.dp.toPx(),depthEffect=true,chromaticAberration=true)},
+                onDrawSurface={drawRect(Color(0xFF20B86A).copy(alpha=.18f + .22f*reveal))}
+            ).border(1.dp,Color(0xFFB8FFD6).copy(alpha=.20f + .25f*reveal),glassShape)
+        } else Modifier.matchParentSize().background(if(offset>0f) Ocean else containerColor)
+        Box(revealModifier) {
+            if(offset>0f) {
+                Icon(Icons.Default.Call,null,Modifier.align(Alignment.CenterStart).padding(start=24.dp),tint=Color.White)
+                if(greenGlass) Text("Вызов",Modifier.align(Alignment.CenterStart).padding(start=58.dp),color=Color.White.copy(alpha=(.45f+.55f*reveal).coerceAtMost(1f)),fontWeight=FontWeight.SemiBold,fontSize=13.sp)
+            }
         }
         Box(Modifier.offset { IntOffset(offset.toInt(),0) }.fillMaxWidth().background(containerColor)
             .draggable(state=dragState,orientation=Orientation.Horizontal,enabled=enabled,onDragStarted={settleJob?.cancel()},onDragStopped={velocity->
