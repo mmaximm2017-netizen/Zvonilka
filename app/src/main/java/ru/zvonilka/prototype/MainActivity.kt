@@ -232,16 +232,7 @@ class MainActivity : ComponentActivity() {
                     IconButton(onClick={settings=!settings}) { Icon(Icons.Outlined.Settings,"Настройки") }
                 }
             ) },
-            bottomBar={ if(!settings && selected==null) NavigationBar(containerColor=MaterialTheme.colorScheme.surface,tonalElevation=0.dp) {
-                listOf(Icons.Outlined.History,Icons.Outlined.Contacts,Icons.Outlined.Dialpad).forEachIndexed { i,icon->
-                    NavigationBarItem(
-                        colors=NavigationBarItemDefaults.colors(indicatorColor=MaterialTheme.colorScheme.primaryContainer.copy(alpha=.55f),selectedIconColor=MaterialTheme.colorScheme.primary,selectedTextColor=MaterialTheme.colorScheme.primary),
-                        selected=tab==i,onClick={tab=i;if(i==0) MissedCalls.clear(this@MainActivity)},
-                        icon={BadgedBox(badge={if(i==0 && missedCount>0)Badge{Text(if(missedCount>99)"99+" else missedCount.toString())}}){Icon(icon,null,Modifier.size(22.dp))}},
-                        label={Text(listOf("Недавние","Контакты","Клавиши")[i],fontSize=10.sp,fontWeight=FontWeight.Normal)}
-                    )
-                }
-            } }
+            bottomBar={ if(!settings && selected==null) GlassBottomBar() }
         ) { padding->
             Column(Modifier.padding(padding).fillMaxSize()) {
                 if(loading) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -285,6 +276,55 @@ class MainActivity : ComponentActivity() {
         cropSource?.let { source -> PhotoCropEditor(source,photoPreviewName,onSave={photoDraft=it;photoOriginal=source;changedPhoto=true;cropSource=null},onDismiss={cropSource=null}) }
         confirmation?.let { (title,action)->Confirm(title,{confirmation=null}) { confirmation=null;action() } }
         error?.let { message->AlertDialog(onDismissRequest={error=null},title={Text("Звонилка")},text={Text(message)},confirmButton={TextButton(onClick={error=null}){Text("Понятно")}}) }
+    }
+
+    @Composable private fun GlassBottomBar() {
+        val dark=isSystemInDarkTheme()
+        val labels=listOf("Недавние","Контакты","Клавиши")
+        val icons=listOf(Icons.Outlined.History,Icons.Outlined.Contacts,Icons.Outlined.Dialpad)
+        Box(
+            Modifier.fillMaxWidth().background(Color.Transparent).navigationBarsPadding().padding(horizontal=12.dp,vertical=8.dp),
+            contentAlignment=Alignment.Center
+        ) {
+            Surface(
+                modifier=Modifier.fillMaxWidth().height(70.dp),
+                shape=RoundedCornerShape(30.dp),
+                color=if(dark) MaterialTheme.colorScheme.surface.copy(alpha=.82f) else Color.White.copy(alpha=.84f),
+                border=BorderStroke(1.dp,if(dark) Color.White.copy(alpha=.12f) else Color.White.copy(alpha=.90f)),
+                shadowElevation=10.dp,
+                tonalElevation=0.dp
+            ) {
+                Row(Modifier.fillMaxSize().padding(5.dp),verticalAlignment=Alignment.CenterVertically) {
+                    icons.forEachIndexed { i,icon->
+                        val active=tab==i
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(
+                                if(active) MaterialTheme.colorScheme.primaryContainer.copy(alpha=if(dark).62f else .70f) else Color.Transparent
+                            ).clickable {
+                                tab=i
+                                if(i==0) MissedCalls.clear(this@MainActivity)
+                            },
+                            contentAlignment=Alignment.Center
+                        ) {
+                            Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
+                                BadgedBox(badge={if(i==0 && missedCount>0) Badge { Text(if(missedCount>99)"99+" else missedCount.toString()) }}) {
+                                    Icon(
+                                        icon,labels[i],Modifier.size(if(active)23.dp else 22.dp),
+                                        tint=if(active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.82f)
+                                    )
+                                }
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    labels[i],fontSize=10.sp,
+                                    fontWeight=if(active) FontWeight.SemiBold else FontWeight.Normal,
+                                    color=if(active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.82f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @Composable private fun SimBadge(p:PersonRecord) {
