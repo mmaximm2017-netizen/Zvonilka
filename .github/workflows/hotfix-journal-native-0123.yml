@@ -1,0 +1,32 @@
+name: Hotfix journal native crash 0.12.3
+on:
+  push:
+    branches: [ fix/journal-swipe-native-crash-0.12.3 ]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply hotfix
+        run: python hotfix_journal_native.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Test release build and lint
+        run: gradle :app:testDebugUnitTest :app:assembleRelease :app:lintRelease --no-daemon
+      - name: Commit hotfix
+        run: |
+          git config user.name "mmaximm2017-netizen"
+          git config user.email "mmaximm2017@gmail.com"
+          git add app/src/main/java/ru/zvonilka/prototype/Ui.kt app/build.gradle.kts
+          git commit -m "Avoid backdrop renderer in journal swipe"
+          git push origin HEAD:fix/journal-swipe-native-crash-0.12.3
