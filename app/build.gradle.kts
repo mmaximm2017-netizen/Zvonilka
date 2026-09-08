@@ -5,14 +5,14 @@ plugins {
 }
 android {
     namespace = "ru.zvonilka.prototype"
-    compileSdk = 35
+    compileSdk = 36
     buildToolsVersion = "35.0.0"
     defaultConfig {
         applicationId = "ru.zvonilka.prototype"
         minSdk = 29
         targetSdk = 35
-        versionCode = 26
-        versionName = "0.11.8"
+        versionCode = 27
+        versionName = "0.11.9"
     }
     buildFeatures {
         compose = true
@@ -31,5 +31,6 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("io.github.kyant0:backdrop:1.0.0")
     testImplementation("junit:junit:4.13.2")
 }
