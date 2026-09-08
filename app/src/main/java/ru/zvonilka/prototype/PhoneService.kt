@@ -133,7 +133,10 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
                 .setContentText(if(ringing) "Входящий вызов" else "Текущий разговор")
                 .setCategory(Notification.CATEGORY_CALL).setContentIntent(open).build())
         if (ringing) builder.setFullScreenIntent(open, true)
-        if (Build.VERSION.SDK_INT >= 31) {
+        // Samsung Android 16 (API 36) rejects our CallStyle payload at NotificationManager
+        // with IllegalArgumentException. Use a standard CATEGORY_CALL notification on API 36+
+        // while keeping the same actions and full-screen intent.
+        if (Build.VERSION.SDK_INT in 31..35) {
             val person = Person.Builder().setName(displayName).setImportant(true).build()
             builder.setStyle(if (ringing) Notification.CallStyle.forIncomingCall(person, action("reject"), action("answer"))
                 else Notification.CallStyle.forOngoingCall(person, action("hangup")))
@@ -142,7 +145,26 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
             builder.addAction(Notification.Action.Builder(null, if (ringing) "Отклонить" else "Завершить", action(if (ringing) "reject" else "hangup")).build())
         }
         if (Build.VERSION.SDK_INT < 33 || checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            manager.notify(id, builder.build())
+            try {
+                manager.notify(id, builder.build())
+            } catch (error: IllegalArgumentException) {
+                CallDiagnostics.record(this, "notification_primary_rejected", error)
+                val fallback = Notification.Builder(this, if (ringing) "calls" else "ongoing")
+                    .setSmallIcon(android.R.drawable.sym_action_call)
+                    .setContentTitle(displayName)
+                    .setContentText(CallStore.state(call))
+                    .setCategory(Notification.CATEGORY_CALL)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .setVisibility(Notification.VISIBILITY_PRIVATE)
+                    .setContentIntent(open)
+                if (ringing) {
+                    fallback.setFullScreenIntent(open,true)
+                    fallback.addAction(Notification.Action.Builder(null,"Принять",action("answer")).build())
+                }
+                fallback.addAction(Notification.Action.Builder(null,if(ringing) "Отклонить" else "Завершить",action(if(ringing) "reject" else "hangup")).build())
+                manager.notify(id,fallback.build())
+            }
         }
         } catch (error: RuntimeException) {
             CallDiagnostics.record(this, "notification_error", error)
