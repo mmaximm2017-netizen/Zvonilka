@@ -252,7 +252,7 @@ class MainActivity : ComponentActivity() {
                 when {
                     settings -> Settings()
                     selected!=null -> ContactCard(selected!!)
-                    tab==0 -> HistoryList(history)
+                    tab==0 -> HistoryList(history,glassBackdrop)
                     tab==1 -> {
                         OutlinedTextField(query,{query=it},Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp).height(52.dp),placeholder={Text("Имя или номер")},leadingIcon={Icon(Icons.Default.Search,null,Modifier.size(20.dp))},trailingIcon={if(query.isNotEmpty()) IconButton(onClick={query=""}){Icon(Icons.Default.Close,"Очистить поиск",Modifier.size(18.dp))}},shape=RoundedCornerShape(14.dp),colors=OutlinedTextFieldDefaults.colors(unfocusedContainerColor=MaterialTheme.colorScheme.surfaceVariant,focusedContainerColor=MaterialTheme.colorScheme.surface,unfocusedBorderColor=Color.Transparent),singleLine=true)
                         val filtered=remember(people,query) { people.filter { NumberTools.matches(it.name,it.numbers,query) } }
@@ -376,7 +376,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun HistoryList(rows:List<HistoryRecord>) {
+    @Composable private fun HistoryList(rows:List<HistoryRecord>,glassBackdrop:Backdrop) {
         var expanded by remember { mutableStateOf<Long?>(null) }
         var chosen by remember { mutableStateOf(emptySet<Long>()) }
         var editMode by remember { mutableStateOf(false) }
@@ -419,7 +419,7 @@ class MainActivity : ComponentActivity() {
                     val color=historyColor(h.type)
                     val kind=when(h.type) { CallLog.Calls.MISSED_TYPE->"Пропущенный";CallLog.Calls.OUTGOING_TYPE->"Исходящий";CallLog.Calls.REJECTED_TYPE->"Отклонённый";else->"Входящий" }
                     fun selectRow() { chosen=if(h.id in chosen) chosen-h.id else chosen+h.id }
-                    SwipeCall(shape=RoundedCornerShape(0.dp),containerColor=MaterialTheme.colorScheme.background,enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h}) {
+                    SwipeCall(shape=RoundedCornerShape(0.dp),containerColor=MaterialTheme.colorScheme.background,glassBackdrop=glassBackdrop,greenGlass=true,enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h}) {
                         Column(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(horizontal=10.dp,vertical=9.dp)) {
                             Row(verticalAlignment=Alignment.CenterVertically) {
