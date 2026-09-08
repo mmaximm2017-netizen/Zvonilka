@@ -2,8 +2,12 @@ package ru.zvonilka.prototype
 
 import android.graphics.BitmapFactory
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.*
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,6 +18,8 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
+import android.os.Build
+import android.view.HapticFeedbackConstants
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -23,6 +29,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.*
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -100,29 +107,32 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
 }
 @OptIn(ExperimentalFoundationApi::class)
 @Composable fun SwipeCall(modifier:Modifier=Modifier,onCall:()->Unit,onTap:()->Unit,onLong:()->Unit={},enabled:Boolean=true,shape:androidx.compose.ui.graphics.Shape=RoundedCornerShape(20.dp),containerColor:Color=MaterialTheme.colorScheme.surface,content:@Composable ()->Unit) {
-    val offset=remember { Animatable(0f) }; val scope=rememberCoroutineScope(); var width by remember { mutableIntStateOf(1) }
+    var offset by remember { mutableFloatStateOf(0f) }; val scope=rememberCoroutineScope(); var width by remember { mutableIntStateOf(1) }
+    var settleJob by remember { mutableStateOf<Job?>(null) }
     val view=LocalView.current
     val call by rememberUpdatedState(onCall)
+    val dragState=rememberDraggableState { delta->if(enabled) offset=(offset+delta).coerceIn(0f,width.toFloat()) }
     Box(modifier.clip(shape).onSizeChanged { width=it.width }) {
-        // The action background must follow content size, never impose its own height.
-        Box(Modifier.matchParentSize().background(if(offset.value>0f) Ocean else containerColor)) {
-            if(offset.value>0f) Icon(Icons.Default.Call,null,Modifier.align(Alignment.CenterStart).padding(start=24.dp),tint=Color.White)
+        Box(Modifier.matchParentSize().background(if(offset>0f) Ocean else containerColor)) {
+            if(offset>0f) Icon(Icons.Default.Call,null,Modifier.align(Alignment.CenterStart).padding(start=24.dp),tint=Color.White)
         }
-        Box(Modifier.offset { IntOffset(offset.value.toInt(),0) }.fillMaxWidth().background(containerColor)
-            .pointerInput(width,enabled) {
-                if(!enabled) return@pointerInput
-                detectHorizontalDragGestures(onDragEnd={
-                    val complete=offset.value>=width*0.82f
-                    scope.launch {
-                        if(complete) { offset.animateTo(width.toFloat());view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);call() }
-                        offset.animateTo(0f)
+        Box(Modifier.offset { IntOffset(offset.toInt(),0) }.fillMaxWidth().background(containerColor)
+            .draggable(state=dragState,orientation=Orientation.Horizontal,enabled=enabled,onDragStarted={settleJob?.cancel()},onDragStopped={velocity->
+                settleJob=scope.launch {
+                    val complete=GesturePolicy.shouldComplete(offset,width.toFloat(),velocity,.65f,.22f,1400f)
+                    val target=if(complete) width.toFloat() else 0f
+                    val anim=Animatable(offset)
+                    anim.animateTo(target,spring(dampingRatio=Spring.DampingRatioNoBouncy,stiffness=Spring.StiffnessMediumLow),initialVelocity=velocity){offset=value}
+                    if(complete) {
+                        val haptic=if(Build.VERSION.SDK_INT>=30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
+                        view.performHapticFeedback(haptic);offset=0f;call()
                     }
-                },onDragCancel={scope.launch { offset.animateTo(0f) }}) { change,amount ->
-                    change.consume();scope.launch { offset.snapTo((offset.value+amount).coerceIn(0f,width.toFloat())) }
                 }
-            }.combinedClickable(onClick=onTap,onLongClick=onLong)) { content() }
+            })
+            .combinedClickable(enabled=enabled,onClick=onTap,onLongClick=onLong)) { content() }
     }
 }
+
 @Composable fun Confirm(title:String,onDismiss:()->Unit,onConfirm:()->Unit) {
     AlertDialog(onDismissRequest=onDismiss,title={Text(title)},confirmButton={TextButton(onClick=onConfirm){Text("Подтвердить",color=Red)}},dismissButton={TextButton(onClick=onDismiss){Text("Отмена")}})
 }
