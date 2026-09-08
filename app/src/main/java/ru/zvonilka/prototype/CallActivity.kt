@@ -14,6 +14,14 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.AbsoluteRoundedCornerShape
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -71,6 +79,8 @@ class CallActivity : ComponentActivity() {
         var seconds by remember { mutableLongStateOf(0) }
         var lastCallKey by remember {mutableStateOf<String?>(null)}
         var keypad by remember(key) { mutableStateOf(false) }
+        var audioPicker by remember(key) { mutableStateOf(false) }
+        val glassBackdrop=rememberLayerBackdrop()
         val person=if(call!=null) ContactCache.find(CallStore.label(call)) else lastPerson
         val audio=CallStore.service?.callAudioState
         LaunchedEffect(key,tick) {
@@ -85,9 +95,11 @@ class CallActivity : ComponentActivity() {
         val white=Color.White
         val secondary=white.copy(alpha=.72f)
         val ringing=call?.state==Call.STATE_RINGING
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF34536B),Color(0xFF182A40),Color(0xFF101722))))) {
-            if(person!=null) Photo(person,Modifier.fillMaxSize(),true)
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x70070D18),Color(0x20070D18),Color(0xD909101B)))))
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().layerBackdrop(glassBackdrop).background(Brush.verticalGradient(listOf(Color(0xFF34536B),Color(0xFF182A40),Color(0xFF101722))))) {
+                if(person!=null) Photo(person,Modifier.fillMaxSize(),true)
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x70070D18),Color(0x20070D18),Color(0xD909101B)))))
+            }
             BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
                 val compact=maxHeight<650.dp
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min=maxHeight).padding(horizontal=28.dp,vertical=20.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.SpaceBetween) {
@@ -107,13 +119,13 @@ class CallActivity : ComponentActivity() {
                     Column(Modifier.fillMaxWidth().widthIn(max=420.dp).padding(top=28.dp),horizontalAlignment=Alignment.CenterHorizontally) {
                         live.forEach { (id,other)->if(id!=key) TextButton(onClick={selected=id}){Text("${ContactCache.find(CallStore.label(other))?.name ?: CallStore.label(other)} · ${CallStore.state(other)}",color=white,textAlign=TextAlign.Center)} }
                         if(ringing && call!=null) {
-                            key(key) { CallSlideAction("Ответить",Color(0xFF34C759),Icons.Default.Call){if(call.state==Call.STATE_RINGING)call.answer(VideoProfile.STATE_AUDIO_ONLY)} }
+                            key(key) { CallSlideAction("Ответить",Color(0xFF34C759),Icons.Default.Call,glassBackdrop){if(call.state==Call.STATE_RINGING)call.answer(VideoProfile.STATE_AUDIO_ONLY)} }
                             Spacer(Modifier.height(if(compact)12.dp else 32.dp))
                         } else if(call!=null) {
                             if(call.state==Call.STATE_SELECT_PHONE_ACCOUNT) {
                                 @Suppress("DEPRECATION")
                                 val accounts=call.details.extras?.getParcelableArrayList<PhoneAccountSuggestion>(Call.EXTRA_SUGGESTED_PHONE_ACCOUNTS)?.map{it.phoneAccountHandle}.orEmpty()
-                                accounts.forEach { a->Button(onClick={call.phoneAccountSelected(a,false)}){Text(Dialing.label(this@CallActivity,a))} }
+                                accounts.forEach { a->GlassChoiceButton(glassBackdrop,Dialing.label(this@CallActivity,a)){call.phoneAccountSelected(a,false)} }
                             }
                             AnimatedContent(
                                 targetState=keypad && call.state==Call.STATE_ACTIVE,
@@ -123,24 +135,21 @@ class CallActivity : ComponentActivity() {
                             ) { showKeypad->
                                 if(showKeypad) {
                                     Column(horizontalAlignment=Alignment.CenterHorizontally) {
-                                        Dialpad(call)
+                                        Dialpad(call,glassBackdrop)
                                         TextButton(onClick={stopTone();keypad=false}){Text("Скрыть клавиатуру",color=white)}
                                     }
                                 } else {
                                     Column {
                                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
-                                            Control("Микрофон",Icons.Default.MicOff,audio?.isMuted==true){CallStore.service?.setMuted(audio?.isMuted!=true)}
-                                            Control("Клавиши",Icons.Default.Dialpad,enabled=call.state==Call.STATE_ACTIVE){keypad=true}
-                                            Control("Динамик",Icons.Default.VolumeUp,audio?.route==CallAudioState.ROUTE_SPEAKER){CallStore.service?.setAudioRoute(if(audio?.route==CallAudioState.ROUTE_SPEAKER) CallAudioState.ROUTE_WIRED_OR_EARPIECE else CallAudioState.ROUTE_SPEAKER)}
+                                            Control(glassBackdrop,"Микрофон",Icons.Default.MicOff,audio?.isMuted==true){CallStore.service?.setMuted(audio?.isMuted!=true)}
+                                            Control(glassBackdrop,"Клавиши",Icons.Default.Dialpad,enabled=call.state==Call.STATE_ACTIVE){keypad=true}
+                                            Control(glassBackdrop,"Динамик",Icons.Default.VolumeUp,audio?.route==CallAudioState.ROUTE_SPEAKER){CallStore.service?.setAudioRoute(if(audio?.route==CallAudioState.ROUTE_SPEAKER) CallAudioState.ROUTE_WIRED_OR_EARPIECE else CallAudioState.ROUTE_SPEAKER)}
                                         }
                                         Spacer(Modifier.height(24.dp))
                                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
-                                            Control("Добавить",Icons.Default.Add){startActivity(Intent(this@CallActivity,MainActivity::class.java).setAction(Intent.ACTION_DIAL))}
-                                            Control("Удержание",Icons.Default.Pause,call.state==Call.STATE_HOLDING,enabled=call.details.can(Call.Details.CAPABILITY_HOLD)){if(call.state==Call.STATE_HOLDING)call.unhold() else call.hold()}
-                                            Control("Аудио",Icons.Default.Bluetooth,audio?.route==CallAudioState.ROUTE_BLUETOOTH){
-                                                val routes=listOf(CallAudioState.ROUTE_EARPIECE to "Телефон",CallAudioState.ROUTE_SPEAKER to "Динамик",CallAudioState.ROUTE_BLUETOOTH to "Bluetooth",CallAudioState.ROUTE_WIRED_HEADSET to "Гарнитура").filter{(audio?.supportedRouteMask ?: 0) and it.first != 0}
-                                                android.app.AlertDialog.Builder(this@CallActivity).setTitle("Аудиовыход").setItems(routes.map{it.second}.toTypedArray()){_,i->CallStore.service?.setAudioRoute(routes[i].first)}.show()
-                                            }
+                                            Control(glassBackdrop,"Добавить",Icons.Default.Add){startActivity(Intent(this@CallActivity,MainActivity::class.java).setAction(Intent.ACTION_DIAL))}
+                                            Control(glassBackdrop,"Удержание",Icons.Default.Pause,call.state==Call.STATE_HOLDING,enabled=call.details.can(Call.Details.CAPABILITY_HOLD)){if(call.state==Call.STATE_HOLDING)call.unhold() else call.hold()}
+                                            Control(glassBackdrop,"Аудио",Icons.Default.Bluetooth,audio?.route==CallAudioState.ROUTE_BLUETOOTH){audioPicker=true}
                                         }
                                     }
                                 }
@@ -149,31 +158,100 @@ class CallActivity : ComponentActivity() {
                             val hangupInteraction=remember(key){MutableInteractionSource()}
                             val hangupPressed by hangupInteraction.collectIsPressedAsState()
                             val hangupScale by animateFloatAsState(if(hangupPressed).97f else 1f,tween(120),label="hangupPress")
-                            FilledIconButton(onClick={call.disconnect()},interactionSource=hangupInteraction,modifier=Modifier.size(80.dp).graphicsLayer{scaleX=hangupScale;scaleY=hangupScale},colors=IconButtonDefaults.filledIconButtonColors(containerColor=Color(0xFFFF453A),contentColor=white)){Icon(Icons.Default.CallEnd,"Завершить вызов",Modifier.size(36.dp))}
+                            Box(Modifier.size(94.dp).drawBackdrop(
+                                backdrop=glassBackdrop,
+                                shape={AbsoluteRoundedCornerShape(47.dp)},
+                                effects={vibrancy();blur(8.dp.toPx());lens(15.dp.toPx(),10.dp.toPx(),depthEffect=true,chromaticAberration=true)},
+                                onDrawSurface={drawRect(Color.White.copy(alpha=.10f))}
+                            ),contentAlignment=Alignment.Center) {
+                                FilledIconButton(onClick={call.disconnect()},interactionSource=hangupInteraction,modifier=Modifier.size(80.dp).graphicsLayer{scaleX=hangupScale;scaleY=hangupScale},colors=IconButtonDefaults.filledIconButtonColors(containerColor=Color(0xFFFF453A),contentColor=white)){Icon(Icons.Default.CallEnd,"Завершить вызов",Modifier.size(36.dp))}
+                            }
                             Spacer(Modifier.height(if(compact)8.dp else 24.dp))
+                        }
+                    }
+                }
+            }
+            if(audioPicker && call!=null) {
+                val routes=listOf(
+                    CallAudioState.ROUTE_EARPIECE to "Телефон",
+                    CallAudioState.ROUTE_SPEAKER to "Динамик",
+                    CallAudioState.ROUTE_BLUETOOTH to "Bluetooth",
+                    CallAudioState.ROUTE_WIRED_HEADSET to "Гарнитура"
+                ).filter{(audio?.supportedRouteMask ?: 0) and it.first != 0}
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha=.24f)).clickable{audioPicker=false}) {
+                    Column(
+                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(16.dp)
+                            .drawBackdrop(
+                                backdrop=glassBackdrop,
+                                shape={AbsoluteRoundedCornerShape(30.dp)},
+                                effects={vibrancy();blur(14.dp.toPx());lens(18.dp.toPx(),13.dp.toPx(),depthEffect=true,chromaticAberration=true)},
+                                onDrawSurface={drawRect(Color(0xFF0A1320).copy(alpha=.30f))}
+                            )
+                            .border(1.dp,Color.White.copy(alpha=.20f),AbsoluteRoundedCornerShape(30.dp))
+                            .padding(18.dp)
+                            .clickable(enabled=false){},
+                        horizontalAlignment=Alignment.CenterHorizontally
+                    ) {
+                        Text("Аудиовыход",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.SemiBold)
+                        Spacer(Modifier.height(10.dp))
+                        routes.forEach { (route,name)->
+                            val active=audio?.route==route
+                            TextButton(
+                                onClick={CallStore.service?.setAudioRoute(route);audioPicker=false},
+                                modifier=Modifier.fillMaxWidth().height(50.dp)
+                            ){
+                                Text(name,color=if(active)Color.White else Color.White.copy(alpha=.82f),fontWeight=if(active)FontWeight.SemiBold else FontWeight.Normal)
+                            }
                         }
                     }
                 }
             }
         }
     }
-    @Composable private fun Control(label:String,icon:androidx.compose.ui.graphics.vector.ImageVector,active:Boolean=false,enabled:Boolean=true,color:Color=Color.White.copy(alpha=.18f),action:()->Unit) {
+    @Composable private fun Control(backdrop:Backdrop,label:String,icon:androidx.compose.ui.graphics.vector.ImageVector,active:Boolean=false,enabled:Boolean=true,action:()->Unit) {
         val interaction=remember { MutableInteractionSource() }
         val pressed by interaction.collectIsPressedAsState()
         val scale by animateFloatAsState(if(pressed && enabled).97f else 1f,tween(120),label="controlPress")
+        val shape=AbsoluteRoundedCornerShape(36.dp)
         Column(Modifier.width(84.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-            FilledIconButton(onClick=action,enabled=enabled,interactionSource=interaction,modifier=Modifier.size(72.dp).graphicsLayer{scaleX=scale;scaleY=scale}.semantics{if(enabled && label in listOf("Микрофон","Динамик","Удержание"))stateDescription=if(active) "Включено" else "Выключено"},colors=IconButtonDefaults.filledIconButtonColors(containerColor=if(active)Color.White else color,contentColor=if(active)Color(0xFF18202A) else Color.White,disabledContainerColor=Color.White.copy(alpha=.08f),disabledContentColor=Color.White.copy(alpha=.3f))){Icon(icon,label,Modifier.size(30.dp))}
+            FilledIconButton(
+                onClick=action,enabled=enabled,interactionSource=interaction,
+                modifier=Modifier.size(72.dp).drawBackdrop(
+                    backdrop=backdrop,shape={shape},
+                    effects={vibrancy();blur(9.dp.toPx());lens(15.dp.toPx(),11.dp.toPx(),depthEffect=true,chromaticAberration=true)},
+                    onDrawSurface={drawRect(if(active)Color.White.copy(alpha=.72f) else Color.White.copy(alpha=.12f))}
+                ).border(1.dp,Color.White.copy(alpha=if(active).72f else .18f),shape).graphicsLayer{scaleX=scale;scaleY=scale}.semantics{if(enabled && label in listOf("Микрофон","Динамик","Удержание"))stateDescription=if(active) "Включено" else "Выключено"},
+                colors=IconButtonDefaults.filledIconButtonColors(containerColor=Color.Transparent,contentColor=if(active)Color(0xFF18202A) else Color.White,disabledContainerColor=Color.Transparent,disabledContentColor=Color.White.copy(alpha=.3f))
+            ){Icon(icon,label,Modifier.size(30.dp))}
             Text(label,color=Color.White.copy(alpha=if(enabled)1f else .4f),fontSize=13.sp,fontWeight=FontWeight.Normal,modifier=Modifier.padding(top=8.dp),textAlign=TextAlign.Center)
         }
     }
+
+    @Composable private fun GlassChoiceButton(backdrop:Backdrop,label:String,onClick:()->Unit) {
+        val shape=AbsoluteRoundedCornerShape(24.dp)
+        TextButton(
+            onClick=onClick,
+            modifier=Modifier.fillMaxWidth().padding(vertical=4.dp).height(52.dp).drawBackdrop(
+                backdrop=backdrop,shape={shape},
+                effects={vibrancy();blur(10.dp.toPx());lens(13.dp.toPx(),9.dp.toPx(),depthEffect=true,chromaticAberration=true)},
+                onDrawSurface={drawRect(Color.White.copy(alpha=.12f))}
+            ).border(1.dp,Color.White.copy(alpha=.18f),shape)
+        ){Text(label,color=Color.White,fontSize=16.sp)}
+    }
+
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-    @Composable private fun Dialpad(call:Call) {
+    @Composable private fun Dialpad(call:Call,backdrop:Backdrop) {
         val letters=listOf("","ABC","DEF","GHI","JKL","MNO","PQRS","TUV","WXYZ","","+","")
         DisposableEffect(call) { onDispose { stopTone() } }
         listOf("123","456","789","*0#").forEachIndexed { row,line ->
             Row(Modifier.fillMaxWidth().padding(vertical=5.dp),horizontalArrangement=Arrangement.SpaceEvenly) {
                 line.forEachIndexed { column,ch ->
-                    Box(Modifier.size(68.dp).clip(CircleShape).background(Color.White.copy(alpha=.18f)).semantics {
+                    val keyShape=AbsoluteRoundedCornerShape(34.dp)
+                    Box(Modifier.size(68.dp).drawBackdrop(
+                        backdrop=backdrop,shape={keyShape},
+                        effects={vibrancy();blur(8.dp.toPx());lens(13.dp.toPx(),9.dp.toPx(),depthEffect=true,chromaticAberration=true)},
+                        onDrawSurface={drawRect(Color.White.copy(alpha=.12f))}
+                    ).border(1.dp,Color.White.copy(alpha=.16f),keyShape).semantics {
                         contentDescription=ch.toString()
                         onClick { stopTone();toneCall=call;call.playDtmfTone(ch);android.os.Handler(mainLooper).postDelayed({if(toneCall===call)stopTone()},150);true }
                     }.pointerInteropFilter { event->when(event.action){android.view.MotionEvent.ACTION_DOWN->{stopTone();toneCall=call;call.playDtmfTone(ch)};android.view.MotionEvent.ACTION_UP,android.view.MotionEvent.ACTION_CANCEL->stopTone()};true },contentAlignment=Alignment.Center) {
