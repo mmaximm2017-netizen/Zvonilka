@@ -121,13 +121,19 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
     Box(modifier.clip(shape).onSizeChanged { width=it.width }) {
         val reveal=if(offset>0f) (offset/width.toFloat()).coerceIn(0f,1f) else 0f
         val glassShape=AbsoluteRoundedCornerShape(18.dp)
-        val revealModifier=if(glassBackdrop!=null && greenGlass && offset>0f) {
-            Modifier.matchParentSize().drawBackdrop(
-                backdrop=glassBackdrop,
-                shape={glassShape},
-                effects={vibrancy();blur(9.dp.toPx());lens(14.dp.toPx(),10.dp.toPx(),depthEffect=true,chromaticAberration=true)},
-                onDrawSurface={drawRect(Color(0xFF20B86A).copy(alpha=.18f + .22f*reveal))}
-            ).border(1.dp,Color(0xFFB8FFD6).copy(alpha=.20f + .25f*reveal),glassShape)
+        val revealModifier=if(greenGlass && offset>0f) {
+            Modifier.matchParentSize()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color(0xFF2FD27C).copy(alpha=.34f + .18f*reveal),
+                            Color(0xFF169D5A).copy(alpha=.22f + .12f*reveal),
+                            Color.White.copy(alpha=.08f + .08f*reveal)
+                        )
+                    ),
+                    glassShape
+                )
+                .border(1.dp,Color(0xFFB8FFD6).copy(alpha=.34f + .24f*reveal),glassShape)
         } else Modifier.matchParentSize().background(if(offset>0f) Color(0xFF20B86A).copy(alpha=.30f) else containerColor)
         Box(revealModifier) {
             if(offset>0f) {
