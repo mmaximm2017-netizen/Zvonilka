@@ -10,7 +10,7 @@ output_apk="$3"
 root_dir="$(cd "$(dirname "$0")/.." && pwd)"
 java -jar "$signer" sign --ks "$ZVONILKA_KEYSTORE" --ks-key-alias zvonilka --ks-pass "file:$ZVONILKA_PASSWORD_FILE" --out "$output_apk" "$input_apk"
 verification="$(java -jar "$signer" verify --verbose --print-certs "$output_apk")"
-expected="$(tr -d '[:space:]' < "$root_dir/signing-certificate.sha256")"
+expected="$(tr -d '[:space:]' < "$root_dir/stable-signing-certificate.sha256")"
 actual="$(echo "$verification" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d '[:space:]')"
 if [ "$actual" != "$expected" ]; then echo "Signing certificate mismatch" >&2; exit 1; fi
 echo "$verification"

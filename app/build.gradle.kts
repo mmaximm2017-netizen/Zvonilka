@@ -15,6 +15,7 @@ android {
         versionName = "0.12.5"
     }
     buildTypes {
+        getByName("release") { applicationIdSuffix = ".stable" }
         getByName("debug") { applicationIdSuffix = ".contacttest" }
     }
     buildFeatures {

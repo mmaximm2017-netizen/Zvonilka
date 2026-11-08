@@ -43,6 +43,11 @@ jobs:
         run: |
           mkdir -p build/delivery
           cp app/build/outputs/apk/release/app-release-unsigned.apk build/delivery/app-release-unsigned.apk
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          "$tools/aapt" dump badging build/delivery/app-release-unsigned.apk > /tmp/stable-badging.txt
+          grep -F "package: name='ru.zvonilka.prototype.stable' versionCode='33' versionName='0.12.5'" /tmp/stable-badging.txt
+          "$tools/aapt" dump xmltree build/delivery/app-release-unsigned.apk AndroidManifest.xml > /tmp/stable-manifest.txt
+          grep -F 'android.telecom.InCallService' /tmp/stable-manifest.txt
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" build/delivery/apksigner.jar
       - uses: actions/upload-artifact@v4
         with:
