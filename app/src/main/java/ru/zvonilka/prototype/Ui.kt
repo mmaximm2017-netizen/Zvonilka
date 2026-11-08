@@ -92,14 +92,16 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
         Column(Modifier.padding(15.dp),verticalArrangement=Arrangement.spacedBy(8.dp),content=content)
     }
 }
-@Composable fun Photo(person:PersonRecord?,modifier:Modifier=Modifier,full:Boolean=false) {
+@Composable fun Photo(person:PersonRecord?,modifier:Modifier=Modifier,full:Boolean=false,onInfo:((String)->Unit)?=null) {
     val thumbnail=remember(person?.id,person?.photo) { person?.photo?.let { BitmapFactory.decodeByteArray(it,0,it.size)?.asImageBitmap() } }
     val context=LocalContext.current.applicationContext
     // Key the state as well as the coroutine so a different caller never sees the old photo.
     val large = key(person?.id,person?.photo,full) {
         val loaded by produceState<ImageBitmap?>(initialValue=null) {
-            if(full && person!=null) value=withContext(Dispatchers.IO) {
-                PhoneData(context).displayPhoto(person.id)?.asImageBitmap()
+            if(full && person!=null) {
+                val (photo,info)=withContext(Dispatchers.IO) { PhoneData(context).resolvePhoto(person.id) }
+                value=photo?.asImageBitmap()
+                onInfo?.invoke(if(photo==null && thumbnail!=null) "Миниатюра: ${thumbnail.width} × ${thumbnail.height} пикс." else info)
             }
         }
         loaded

@@ -574,9 +574,11 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun ContactCard(p:PersonRecord) {
+        var photoInfo by remember(p.id,p.photo) { mutableStateOf("") }
         var menu by remember { mutableStateOf(false) }
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            Box(Modifier.padding(horizontal=16.dp,vertical=8.dp).fillMaxWidth().height(300.dp).clip(RoundedCornerShape(28.dp))) { Photo(p,Modifier.fillMaxSize(),true);Text(p.name,Modifier.align(Alignment.BottomStart).background(Brush.verticalGradient(listOf(Color.Transparent,Color(0xDD071A31)))).fillMaxWidth().padding(20.dp),fontSize=30.sp,color=Color.White) }
+            Box(Modifier.padding(horizontal=16.dp,vertical=8.dp).fillMaxWidth().height(300.dp).clip(RoundedCornerShape(28.dp))) { Photo(p,Modifier.fillMaxSize(),true,onInfo={photoInfo=it});Text(p.name,Modifier.align(Alignment.BottomStart).background(Brush.verticalGradient(listOf(Color.Transparent,Color(0xDD071A31)))).fillMaxWidth().padding(20.dp),fontSize=30.sp,color=Color.White) }
+            if(photoInfo.isNotEmpty()) Text(photoInfo,Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.bodySmall)
             Row(Modifier.fillMaxWidth().padding(vertical=12.dp),horizontalArrangement=Arrangement.SpaceEvenly) {
                 FilledTonalIconButton(onClick={dial(p.primary)}){Icon(Icons.Default.Call,"Позвонить")}
                 FilledTonalIconButton(onClick={try { startActivity(Intent(Intent.ACTION_SENDTO,Uri.fromParts("smsto",p.primary,null))) } catch(_:ActivityNotFoundException){toast("Приложение SMS недоступно")}}){Icon(Icons.Default.Sms,"SMS")}

@@ -120,29 +120,36 @@ class PhoneData(private val context: Context) {
     }
     // Read access follows READ_CONTACTS. Mutations retain their separate local-account guard.
     // Called on Dispatchers.IO only, and only for a large photo surface.
-    fun displayPhoto(id: Long): android.graphics.Bitmap? {
-        if(id < 0 || !allowed(android.Manifest.permission.READ_CONTACTS)) return null
-        return try {
-            CallPhotoStore.read(context,id,thumbnail(id))?.let { bytes ->
-                android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.size)?.let{return it}
-            }
-            val uri=Uri.withAppendedPath(ContentUris.withAppendedId(CC.RawContacts.CONTENT_URI,id),CC.RawContacts.DisplayPhoto.CONTENT_DIRECTORY)
-            fun decode(photoUri:Uri) = ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr,photoUri)) { decoder, info, _ ->
-                val scale=minOf(1f,2048f/maxOf(info.size.width,info.size.height))
-                decoder.setTargetSize((info.size.width*scale).toInt().coerceAtLeast(1),(info.size.height*scale).toInt().coerceAtLeast(1))
-                decoder.allocator=ImageDecoder.ALLOCATOR_SOFTWARE
-            }
-            try { decode(uri) } catch (_: java.io.IOException) {
-                val rawUri=ContentUris.withAppendedId(CC.RawContacts.CONTENT_URI,id)
-                val contactId=cr.query(rawUri,arrayOf(CC.RawContacts.CONTACT_ID),null,null,null)?.use { if(it.moveToFirst()) it.getLong(0) else null } ?: return null
-                val contactUri=ContentUris.withAppendedId(CC.Contacts.CONTENT_URI,contactId)
-                val photoUri=cr.query(contactUri,arrayOf(CC.Contacts.PHOTO_URI),null,null,null)?.use { if(it.moveToFirst()) it.getString(0) else null } ?: return null
-                decode(Uri.parse(photoUri))
-            }
-        } catch (_: java.io.IOException) { null }
-          catch (_: SecurityException) { null }
-          catch (_: IllegalArgumentException) { null }
-          catch (_: IllegalStateException) { null }
+    fun displayPhoto(id:Long):android.graphics.Bitmap? = resolvePhoto(id).first
+    fun resolvePhoto(id:Long):Pair<android.graphics.Bitmap?,String> {
+        if(id<0 || !allowed(android.Manifest.permission.READ_CONTACTS)) return null to "Большое фото недоступно"
+        val thumb=runCatching { thumbnail(id) }.getOrNull()
+        val saved=runCatching { CallPhotoStore.read(context,id,thumb) }.getOrNull()
+        val raw=ContentUris.withAppendedId(CC.RawContacts.CONTENT_URI,id)
+        val aggregate=runCatching {
+            val key=cr.query(raw,arrayOf(CC.RawContacts.CONTACT_ID),null,null,null)?.use { if(it.moveToFirst()) it.getLong(0) else null }
+            key?.let { cr.query(ContentUris.withAppendedId(CC.Contacts.CONTENT_URI,it),arrayOf(CC.Contacts.PHOTO_URI),null,null,null)?.use { c->if(c.moveToFirst()) c.getString(0)?.let(Uri::parse) else null } }
+        }.getOrNull()
+        data class Source(val name:String,val open:()->java.io.InputStream?,val w:Int,val h:Int)
+        val sources=mutableListOf<Source>()
+        fun add(name:String, open:()->java.io.InputStream?) {
+            val bounds=android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds=true }
+            runCatching { open()?.use { android.graphics.BitmapFactory.decodeStream(it,null,bounds) } }
+            if(bounds.outWidth>0 && bounds.outHeight>0) sources+=Source(name,open,bounds.outWidth,bounds.outHeight)
+        }
+        if(saved!=null) add("Фото звонилки"){saved.inputStream()}
+        add("Запись контакта"){cr.openInputStream(Uri.withAppendedPath(raw,CC.RawContacts.DisplayPhoto.CONTENT_DIRECTORY))}
+        if(aggregate!=null) add("Карточка Android"){cr.openInputStream(aggregate)}
+        if(thumb!=null) add("Миниатюра"){thumb.inputStream()}
+        for(src in sources.sortedByDescending { it.w.toLong()*it.h }) {
+            val opts=android.graphics.BitmapFactory.Options()
+            var sample=1
+            while(maxOf(src.w,src.h)/sample>3072) sample*=2
+            opts.inSampleSize=sample
+            val bitmap=runCatching { src.open()?.use { android.graphics.BitmapFactory.decodeStream(it,null,opts) } }.getOrNull()
+            if(bitmap!=null) return bitmap to "${src.name}: ${src.w} × ${src.h} пикс."
+        }
+        return null to "Большое фото не найдено"
     }
     private fun thumbnail(id:Long):ByteArray? = cr.query(CC.Data.CONTENT_URI,arrayOf(CC.CommonDataKinds.Photo.PHOTO),"${CC.Data.RAW_CONTACT_ID}=? AND ${CC.Data.MIMETYPE}=?",arrayOf(id.toString(),CC.CommonDataKinds.Photo.CONTENT_ITEM_TYPE),null)?.use { if(it.moveToFirst() && !it.isNull(0)) it.getBlob(0) else null }
     fun editPhoto(id:Long):ByteArray? {
