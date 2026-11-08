@@ -118,20 +118,26 @@ class PhoneData(private val context: Context) {
             } ?: error("Не удалось проверить удаление")
         }
     }
-    // Read the display photo of this local raw contact, never an aggregated cloud photo.
+    // Read access follows READ_CONTACTS. Mutations retain their separate local-account guard.
     // Called on Dispatchers.IO only, and only for a large photo surface.
     fun displayPhoto(id: Long): android.graphics.Bitmap? {
         if(id < 0 || !allowed(android.Manifest.permission.READ_CONTACTS)) return null
         return try {
-            requireLocal(id)
             CallPhotoStore.read(context,id,thumbnail(id))?.let { bytes ->
                 android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.size)?.let{return it}
             }
             val uri=Uri.withAppendedPath(ContentUris.withAppendedId(CC.RawContacts.CONTENT_URI,id),CC.RawContacts.DisplayPhoto.CONTENT_DIRECTORY)
-            ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr,uri)) { decoder, info, _ ->
+            fun decode(photoUri:Uri) = ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr,photoUri)) { decoder, info, _ ->
                 val scale=minOf(1f,2048f/maxOf(info.size.width,info.size.height))
                 decoder.setTargetSize((info.size.width*scale).toInt().coerceAtLeast(1),(info.size.height*scale).toInt().coerceAtLeast(1))
                 decoder.allocator=ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+            try { decode(uri) } catch (_: java.io.IOException) {
+                val rawUri=ContentUris.withAppendedId(CC.RawContacts.CONTENT_URI,id)
+                val contactId=cr.query(rawUri,arrayOf(CC.RawContacts.CONTACT_ID),null,null,null)?.use { if(it.moveToFirst()) it.getLong(0) else null } ?: return null
+                val contactUri=ContentUris.withAppendedId(CC.Contacts.CONTENT_URI,contactId)
+                val photoUri=cr.query(contactUri,arrayOf(CC.Contacts.PHOTO_URI),null,null,null)?.use { if(it.moveToFirst()) it.getString(0) else null } ?: return null
+                decode(Uri.parse(photoUri))
             }
         } catch (_: java.io.IOException) { null }
           catch (_: SecurityException) { null }
