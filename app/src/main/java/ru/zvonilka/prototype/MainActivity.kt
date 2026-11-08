@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
     }
     private val data by lazy { PhoneData(this) }
     private var people by mutableStateOf(emptyList<PersonRecord>())
+    private var source by mutableStateOf("Все вместе")
     private var history by mutableStateOf(HistoryCache.items)
     private var error by mutableStateOf<String?>(null)
     private var loading by mutableStateOf(false)
@@ -127,6 +128,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         number=savedInstanceState?.getString("number").orEmpty()
         tab=savedInstanceState?.getInt("tab") ?: 0
+        source=getSharedPreferences("settings",0).getString("contactSource","Все вместе") ?: "Все вместе"
         settings=savedInstanceState?.getBoolean("settings") ?: false
         pendingDelete=savedInstanceState?.getLongArray("pendingDelete")?.toSet().orEmpty()
         if(history.isEmpty()) { history=HistorySnapshot.load(this);HistoryCache.items=history }
@@ -187,6 +189,7 @@ class MainActivity : ComponentActivity() {
     private fun dial(value:String)=Dialing.place(this,value) { setup() }
     private fun editorLocal(p:PersonRecord?) { edit=p;photoDraft=p?.photo;photoOriginal=null;cropSource=null;changedPhoto=false;editing=true }
     private fun editor(p:PersonRecord?) {
+        if(p?.writableLocal==false) { toast("Контакт аккаунта доступен только для просмотра");return }
         if(p==null) {
             lifecycleScope.launch {
                 val books=withContext(Dispatchers.IO){data.sim.books()}
@@ -203,6 +206,7 @@ class MainActivity : ComponentActivity() {
         }.setNegativeButton("Отмена",null).show()
     }
     private fun deletePerson(p:PersonRecord) {
+        if(!p.writableLocal) { toast("Контакт аккаунта доступен только для просмотра");return }
         fun local(){confirmation="Удалить ${p.name} из памяти телефона?" to {selected=null;work{data.deleteContact(p.id)}}}
         fun sim(source:SimSource){confirmation="Удалить ${source.name} с ${source.book.label}?" to {selected=null;work{data.sim.delete(source)}}}
         if(p.simSources.isEmpty()){local();return}
@@ -255,7 +259,22 @@ class MainActivity : ComponentActivity() {
                     tab==0 -> HistoryList(history,glassBackdrop)
                     tab==1 -> {
                         OutlinedTextField(query,{query=it},Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp).height(52.dp),placeholder={Text("Имя или номер")},leadingIcon={Icon(Icons.Default.Search,null,Modifier.size(20.dp))},trailingIcon={if(query.isNotEmpty()) IconButton(onClick={query=""}){Icon(Icons.Default.Close,"Очистить поиск",Modifier.size(18.dp))}},shape=RoundedCornerShape(14.dp),colors=OutlinedTextFieldDefaults.colors(unfocusedContainerColor=MaterialTheme.colorScheme.surfaceVariant,focusedContainerColor=MaterialTheme.colorScheme.surface,unfocusedBorderColor=Color.Transparent),singleLine=true)
-                        val filtered=remember(people,query) { people.filter { NumberTools.matches(it.name,it.numbers,query) } }
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
+                            listOf("Телефон","SIM","Все вместе").forEach { label ->
+                                FilterChip(selected=source==label,onClick={
+                                    source=label
+                                    getSharedPreferences("settings",0).edit().putString("contactSource",label).apply()
+                                },label={Text(label)})
+                            }
+                        }
+                        val visible=remember(people,source) {
+                            when(source) {
+                                "Телефон" -> people.filter { it.id>=0 }
+                                "SIM" -> SimMerge.merge(emptyList(),people.flatMap { it.simSources }).sortedBy { it.name.lowercase(Locale.getDefault()) }
+                                else -> people
+                            }
+                        }
+                        val filtered=remember(visible,query) { visible.filter { NumberTools.matches(it.name,it.numbers,query) } }
                         val state=rememberLazyListState()
                         Row(Modifier.weight(1f)) {
                             LazyColumn(state=state,modifier=Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=6.dp,bottom=110.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {

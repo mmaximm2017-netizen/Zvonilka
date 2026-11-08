@@ -10,7 +10,7 @@ import java.text.Collator
 import java.util.Locale
 
 // A record belongs to one local RawContact, never to an aggregated cloud contact.
-data class PersonRecord(val id: Long, val name: String, val numbers: List<String>, val photo: ByteArray? = null, val simSources:List<SimSource> = emptyList()) {
+data class PersonRecord(val id: Long, val name: String, val numbers: List<String>, val photo: ByteArray? = null, val simSources:List<SimSource> = emptyList(), val writableLocal:Boolean = true) {
     val primary get() = numbers.firstOrNull().orEmpty()
 }
 data class HistoryRecord(val id: Long, val number: String, val type: Int, val date: Long, val seconds: Long, val accountId: String?)
@@ -23,7 +23,19 @@ class PhoneData(private val context: Context) {
     fun localContacts(): List<PersonRecord> {
         if (!allowed(android.Manifest.permission.READ_CONTACTS)) return emptyList()
         val ids = mutableListOf<Long>()
-        cr.query(CC.RawContacts.CONTENT_URI, arrayOf(CC.RawContacts._ID), local, null, null)?.use { c -> while(c.moveToNext()) ids.add(c.getLong(0)) }
+        val writable = mutableSetOf<Long>()
+        val simAccounts = if(android.os.Build.VERSION.SDK_INT >= 31)
+            runCatching { CC.SimContacts.getSimAccounts(cr).map { it.accountName to it.accountType }.toSet() }.getOrDefault(emptySet())
+        else emptySet()
+        cr.query(CC.RawContacts.CONTENT_URI, arrayOf(CC.RawContacts._ID, CC.RawContacts.ACCOUNT_NAME, CC.RawContacts.ACCOUNT_TYPE),
+            "${CC.RawContacts.DELETED} = 0", null, null)?.use { c ->
+            while(c.moveToNext()) {
+                val id=c.getLong(0); val name=c.getString(1); val type=c.getString(2)
+                if((name to type) in simAccounts || type in setOf("vnd.sec.contact.sim","vnd.sec.contact.sim2","com.android.sim")) continue
+                ids.add(id)
+                if(type==null || type=="vnd.sec.contact.phone") writable.add(id)
+            }
+        }
         val result = mutableListOf<PersonRecord>()
         ids.chunked(300).forEach { chunk ->
             data class Acc(var name: String = "", val nums: MutableList<Pair<Boolean,String>> = mutableListOf(), var photo: ByteArray? = null)
@@ -40,7 +52,7 @@ class PhoneData(private val context: Context) {
                     }
                 }
             }
-            map.forEach { (id,a) -> result.add(PersonRecord(id,a.name.ifBlank { "Без имени" },a.nums.sortedByDescending { it.first }.map { it.second }.distinctBy(NumberTools::key),a.photo)) }
+            map.forEach { (id,a) -> if(id in writable || a.nums.isNotEmpty()) result.add(PersonRecord(id,a.name.ifBlank { "Без имени" },a.nums.sortedByDescending { it.first }.map { it.second }.distinctBy(NumberTools::key),a.photo,writableLocal=id in writable)) }
         }
         val collator=Collator.getInstance(Locale("ru"))
         return result.sortedWith { a,b -> collator.compare(a.name,b.name) }
@@ -135,7 +147,7 @@ class PhoneData(private val context: Context) {
     }
     fun exportContacts(people:List<PersonRecord>):List<PersonRecord> {
         var total=0
-        return people.filter{it.id>=0}.map { p->
+        return people.filter{it.id>=0 && it.writableLocal}.map { p->
             val full=displayPhoto(p.id)
             val bytes=if(full!=null) try { compactPhoto(full) } finally {full.recycle()} else p.photo
             total+=bytes?.size ?: 0
