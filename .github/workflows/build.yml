@@ -23,10 +23,22 @@ jobs:
         with:
           gradle-version: '8.11.1'
       - run: |
-          gradle :app:testDebugUnitTest :app:assembleRelease :app:lintRelease --no-daemon || {
+          gradle :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:lintRelease --no-daemon || {
             cat app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt 2>/dev/null || true
             exit 1
           }
+      - name: Verify standalone contact test APK
+        run: |
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          cp app/build/outputs/apk/debug/app-debug.apk Zvonilka-Test-0.12.5.apk
+          "$tools/apksigner" verify Zvonilka-Test-0.12.5.apk
+          "$tools/aapt" dump badging Zvonilka-Test-0.12.5.apk > /tmp/contact-test-badging.txt
+          grep -F "package: name='ru.zvonilka.prototype.contacttest'" /tmp/contact-test-badging.txt
+          grep -F "application-label:'Звонилка Тест'" /tmp/contact-test-badging.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zvonilka-Test-0.12.5
+          path: Zvonilka-Test-0.12.5.apk
       - name: Prepare local signing inputs (no private key in CI)
         run: |
           mkdir -p build/delivery

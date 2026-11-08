@@ -14,6 +14,9 @@ android {
         versionCode = 33
         versionName = "0.12.5"
     }
+    buildTypes {
+        getByName("debug") { applicationIdSuffix = ".contacttest" }
+    }
     buildFeatures {
         compose = true
         buildConfig = true

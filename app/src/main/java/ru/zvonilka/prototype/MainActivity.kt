@@ -127,7 +127,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         number=savedInstanceState?.getString("number").orEmpty()
-        tab=savedInstanceState?.getInt("tab") ?: 0
+        tab=savedInstanceState?.getInt("tab") ?: if(BuildConfig.DEBUG) 1 else 0
         source=getSharedPreferences("settings",0).getString("contactSource","Все вместе") ?: "Все вместе"
         settings=savedInstanceState?.getBoolean("settings") ?: false
         pendingDelete=savedInstanceState?.getLongArray("pendingDelete")?.toSet().orEmpty()
@@ -173,6 +173,11 @@ class MainActivity : ComponentActivity() {
     }
     private fun toast(s:String)=android.widget.Toast.makeText(this,s,android.widget.Toast.LENGTH_SHORT).show()
     private fun setup() {
+        if(BuildConfig.DEBUG) {
+            if(!data.allowed(Manifest.permission.READ_CONTACTS)) permissions.launch(arrayOf(Manifest.permission.READ_CONTACTS))
+            else toast("Доступ к контактам разрешён")
+            return
+        }
         val roles=getSystemService(RoleManager::class.java)
         if(!roles.isRoleHeld(RoleManager.ROLE_DIALER)) {
             if(roles.isRoleAvailable(RoleManager.ROLE_DIALER)) startActivity(roles.createRequestRoleIntent(RoleManager.ROLE_DIALER))
@@ -251,7 +256,7 @@ class MainActivity : ComponentActivity() {
         ) { padding->
             Column(Modifier.padding(padding).fillMaxSize().layerBackdrop(glassBackdrop)) {
                 if(loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if(!data.allowed(Manifest.permission.READ_CONTACTS) || !data.allowed(Manifest.permission.CALL_PHONE)) TextButton(onClick={setup()}) { Text("Настроить звонки и доступ к данным") }
+                if(!data.allowed(Manifest.permission.READ_CONTACTS) || (!BuildConfig.DEBUG && !data.allowed(Manifest.permission.CALL_PHONE))) TextButton(onClick={setup()}) { Text(if(BuildConfig.DEBUG) "Разрешить чтение контактов" else "Настроить звонки и доступ к данным") }
                 if(!settings) callScreenIssue?.let { message->TextButton(onClick={CallScreenAccess.openSettings(this@MainActivity)}) { Icon(Icons.Default.NotificationsActive,null);Spacer(Modifier.width(8.dp));Text(message) } }
                 when {
                     settings -> Settings()
