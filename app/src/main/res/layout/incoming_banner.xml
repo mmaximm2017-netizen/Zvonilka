@@ -1,0 +1,5 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="48dp" android:layoutDirection="ltr" android:orientation="horizontal" android:gravity="center_vertical">
+<TextView android:id="@+id/caller" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:singleLine="true" android:ellipsize="end" android:textAppearance="@android:style/TextAppearance.Material.Notification.Title" />
+<ImageButton android:id="@+id/answer_call" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="8dp" android:padding="2dp" android:scaleType="fitCenter" android:background="@android:color/transparent" android:src="@drawable/answer_disc" android:contentDescription="Принять" />
+<ImageButton android:id="@+id/reject_call" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="8dp" android:padding="2dp" android:scaleType="fitCenter" android:background="@android:color/transparent" android:src="@drawable/reject_disc" android:contentDescription="Отклонить" />
+</LinearLayout>

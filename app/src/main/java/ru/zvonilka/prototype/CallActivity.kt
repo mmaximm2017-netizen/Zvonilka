@@ -2,7 +2,6 @@ package ru.zvonilka.prototype
 
 import android.content.Intent
 import android.os.Bundle
-import android.os.PowerManager
 import android.telecom.*
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -49,25 +48,21 @@ class CallActivity : ComponentActivity() {
     private var revision by mutableIntStateOf(0)
     private var selected by mutableStateOf<String?>(null)
     private var toneCall:Call?=null
-    private var proximity:PowerManager.WakeLock?=null
     private val listener:()->Unit={revision++}
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState);enableEdgeToEdge(statusBarStyle=SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),navigationBarStyle=SystemBarStyle.dark(android.graphics.Color.TRANSPARENT));setShowWhenLocked(true);setTurnScreenOn(true)
         appliedTheme=ThemeSettings.mode(this)
         CallDiagnostics.record(this, "screen_created")
         selected=savedInstanceState?.getString("selected") ?: intent.getStringExtra("call_id")
-        val power=getSystemService(PowerManager::class.java)
-        if(power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) proximity=power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,"Zvonilka:proximity")
         handleAnswer(intent)
         setContent { PhoneTheme { CallScreen() } }
     }
     override fun onNewIntent(intent:Intent) { super.onNewIntent(intent);setIntent(intent);selected=intent.getStringExtra("call_id") ?: selected;handleAnswer(intent);revision++ }
     private fun handleAnswer(intent:Intent) { if(intent.action=="answer") CallStore.calls[intent.getStringExtra("call_id")]?.takeIf{it.state==Call.STATE_RINGING}?.answer(VideoProfile.STATE_AUDIO_ONLY) }
     override fun onStart() { super.onStart();CallDiagnostics.record(this,"screen_started");CallStore.listeners.add(listener);revision++ }
-    override fun onStop() { CallStore.listeners.remove(listener);stopTone();releaseProximity();super.onStop() }
+    override fun onStop() { CallStore.listeners.remove(listener);stopTone();super.onStop() }
     override fun onSaveInstanceState(outState:Bundle) {outState.putString("selected",selected);super.onSaveInstanceState(outState)}
     private fun stopTone(){toneCall?.stopDtmfTone();toneCall=null}
-    private fun releaseProximity(){if(proximity?.isHeld==true) proximity?.release()}
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     @Composable private fun CallScreen() {
         val tick=revision
@@ -85,11 +80,9 @@ class CallActivity : ComponentActivity() {
         val audio=CallStore.service?.callAudioState
         LaunchedEffect(key,tick) {
             if(call!=null) {if(lastCallKey!=key)seconds=0;lastCallKey=key; selected=key;lastPerson=ContactCache.find(CallStore.label(call));lastNumber=CallStore.label(call) }
-            val use=call?.state==Call.STATE_ACTIVE && audio?.route==CallAudioState.ROUTE_EARPIECE
-            if(use && proximity?.isHeld==false) proximity?.acquire(2*60*60*1000L) else if(!use) releaseProximity()
         }
         LaunchedEffect(key,call?.state) {
-            if(call==null) { releaseProximity();delay(1000);finish() }
+            if(call==null) { delay(1000);finish() }
             else while(true) { val start=call.details.connectTimeMillis;if(start>0) seconds=((System.currentTimeMillis()-start)/1000).coerceAtLeast(0);delay(1000) }
         }
         val white=Color.White
@@ -119,7 +112,12 @@ class CallActivity : ComponentActivity() {
                     Column(Modifier.fillMaxWidth().widthIn(max=420.dp).padding(top=28.dp),horizontalAlignment=Alignment.CenterHorizontally) {
                         live.forEach { (id,other)->if(id!=key) TextButton(onClick={selected=id}){Text("${ContactCache.find(CallStore.label(other))?.name ?: CallStore.label(other)} · ${CallStore.state(other)}",color=white,textAlign=TextAlign.Center)} }
                         if(ringing && call!=null) {
-                            key(key) { CallSlideAction("Ответить",Color(0xFF34C759),Icons.Default.Call,glassBackdrop){if(call.state==Call.STATE_RINGING)call.answer(VideoProfile.STATE_AUDIO_ONLY)} }
+                            if (!getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) {
+                                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
+                                    FilledIconButton(onClick={if(call.state==Call.STATE_RINGING)call.answer(VideoProfile.STATE_AUDIO_ONLY)},modifier=Modifier.size(72.dp),colors=IconButtonDefaults.filledIconButtonColors(containerColor=Color(0xFF218746),contentColor=white)){ Icon(Icons.Default.Call,"Принять",Modifier.size(32.dp)) }
+                                    FilledIconButton(onClick={if(call.state==Call.STATE_RINGING)call.reject(false,null)},modifier=Modifier.size(72.dp),colors=IconButtonDefaults.filledIconButtonColors(containerColor=Color(0xFFD92D35),contentColor=white)){ Icon(Icons.Default.CallEnd,"Отклонить",Modifier.size(32.dp)) }
+                                }
+                            } else key(key) { CallSlideAction("Ответить",Color(0xFF34C759),Icons.Default.Call,glassBackdrop){if(call.state==Call.STATE_RINGING)call.answer(VideoProfile.STATE_AUDIO_ONLY)} }
                             Spacer(Modifier.height(if(compact)12.dp else 32.dp))
                         } else if(call!=null) {
                             if(call.state==Call.STATE_SELECT_PHONE_ACCOUNT) {
