@@ -122,6 +122,21 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         if (call.state == Call.STATE_DISCONNECTED) { removeCall(call); return }
         syncProximity()
         val previousState = publishedStates.put(call, call.state)
+        // Only the initial outgoing setup -> connected transition, never a resume from hold.
+        if (call.state == Call.STATE_ACTIVE && call.details.callDirection == Call.Details.DIRECTION_OUTGOING &&
+            (previousState == Call.STATE_DIALING || previousState == Call.STATE_CONNECTING ||
+             previousState == Call.STATE_SELECT_PHONE_ACCOUNT)) {
+            val vibrator = if (Build.VERSION.SDK_INT >= 31)
+                getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
+            else getSystemService(android.os.Vibrator::class.java)
+            if (vibrator?.hasVibrator() == true) {
+                val pulse = android.os.VibrationEffect.createOneShot(80L, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
+                if (Build.VERSION.SDK_INT >= 33) vibrator.vibrate(pulse,
+                    android.os.VibrationAttributes.createForUsage(android.os.VibrationAttributes.USAGE_COMMUNICATION_REQUEST))
+                else vibrator.vibrate(pulse, android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_REQUEST).build())
+            }
+        }
         if(previousState != call.state) CallDiagnostics.record(this, "call_state=${call.state}")
         val ringing = call.state == Call.STATE_RINGING
         if(call.state==Call.STATE_ACTIVE) call.details.accountHandle?.let { Dialing.remember(this,CallStore.label(call),it) }
