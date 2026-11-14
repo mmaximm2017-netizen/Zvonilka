@@ -30,22 +30,22 @@ jobs:
       - name: Verify standalone contact test APK
         run: |
           tools="$ANDROID_HOME/build-tools/35.0.0"
-          cp app/build/outputs/apk/debug/app-debug.apk Zvonilka-Test-0.12.16.apk
-          "$tools/apksigner" verify Zvonilka-Test-0.12.16.apk
-          "$tools/aapt" dump badging Zvonilka-Test-0.12.16.apk > /tmp/contact-test-badging.txt
+          cp app/build/outputs/apk/debug/app-debug.apk Zvonilka-Test-0.12.17.apk
+          "$tools/apksigner" verify Zvonilka-Test-0.12.17.apk
+          "$tools/aapt" dump badging Zvonilka-Test-0.12.17.apk > /tmp/contact-test-badging.txt
           grep -F "package: name='ru.zvonilka.prototype.contacttest'" /tmp/contact-test-badging.txt
           grep -F "application-label:'Звонилка Тест'" /tmp/contact-test-badging.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Zvonilka-Test-0.12.16
-          path: Zvonilka-Test-0.12.16.apk
+          name: Zvonilka-Test-0.12.17
+          path: Zvonilka-Test-0.12.17.apk
       - name: Prepare local signing inputs (no private key in CI)
         run: |
           mkdir -p build/delivery
           cp app/build/outputs/apk/release/app-release-unsigned.apk build/delivery/app-release-unsigned.apk
           tools="$ANDROID_HOME/build-tools/35.0.0"
           "$tools/aapt" dump badging build/delivery/app-release-unsigned.apk > /tmp/stable-badging.txt
-          grep -F "package: name='ru.zvonilka.prototype.stable' versionCode='44' versionName='0.12.16'" /tmp/stable-badging.txt
+          grep -F "package: name='ru.zvonilka.prototype.stable' versionCode='45' versionName='0.12.17'" /tmp/stable-badging.txt
           "$tools/aapt" dump xmltree build/delivery/app-release-unsigned.apk AndroidManifest.xml > /tmp/stable-manifest.txt
           grep -F 'android.telecom.InCallService' /tmp/stable-manifest.txt
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" build/delivery/apksigner.jar

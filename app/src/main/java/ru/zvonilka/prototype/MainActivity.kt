@@ -433,12 +433,25 @@ class MainActivity : ComponentActivity() {
                         Column(Modifier.fillMaxWidth().then(if(editMode) Modifier.clickable {selectRow()} else Modifier).background(if(h.id in chosen) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).padding(horizontal=4.dp,vertical=7.dp)) {
                             Row(verticalAlignment=Alignment.CenterVertically) {
                                 if(editMode) IconButton(onClick={confirmDelete(setOf(h.id))}){Icon(Icons.Default.RemoveCircle,"Удалить вызов",tint=Red)}
+                                val neutral=MaterialTheme.colorScheme.onSurfaceVariant
+                                val arrowColor=when(h.type) {
+                                    CallLog.Calls.OUTGOING_TYPE -> Color(0xFF219653)
+                                    CallLog.Calls.INCOMING_TYPE -> Color(0xFF2684EA)
+                                    CallLog.Calls.MISSED_TYPE -> Color(0xFFEA4545)
+                                    else -> neutral
+                                }
+                                Box(Modifier.size(24.dp)) {
+                                    Icon(Icons.Filled.Call,null,Modifier.size(18.dp).align(Alignment.BottomStart),tint=neutral)
+                                    Icon(when(h.type) {
+                                        CallLog.Calls.OUTGOING_TYPE -> Icons.Default.CallMade
+                                        CallLog.Calls.MISSED_TYPE -> Icons.Default.CallMissed
+                                        else -> Icons.Default.CallReceived
+                                    },null,Modifier.size(12.dp).align(Alignment.TopEnd),tint=arrowColor)
+                                }
+                                Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(displayName ?: NumberTools.display(h.number).ifBlank { "Скрытый номер" },color=color,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                                    Row(verticalAlignment=Alignment.CenterVertically) {
-                                        Icon(if(h.type==CallLog.Calls.OUTGOING_TYPE) Icons.Default.CallMade else if(h.type==CallLog.Calls.MISSED_TYPE) Icons.Default.CallMissed else Icons.Default.CallReceived,null,Modifier.size(13.dp),tint=color)
-                                        Spacer(Modifier.width(5.dp));Text(kind,fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
-                                    }
+                                    Text(kind,fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
                                 }
                                 Text(if(day==today) SimpleDateFormat("HH:mm",Locale.getDefault()).format(h.date) else if(day==today.minusDays(1)) "Вчера" else day.format(java.time.format.DateTimeFormatter.ofPattern(if(day.isAfter(today.minusDays(7))) "EEEE" else "dd.MM.yy",Locale("ru"))),Modifier.padding(start=6.dp),fontSize=13.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurfaceVariant)
                                 if(!editMode) IconButton(onClick={expanded=if(expanded==h.id) null else h.id},modifier=Modifier.size(40.dp)){Icon(Icons.Outlined.Info,"Сведения о вызове",tint=MaterialTheme.colorScheme.primary.copy(alpha=.8f),modifier=Modifier.size(19.dp))}
