@@ -11,8 +11,8 @@ android {
         applicationId = "ru.zvonilka.prototype"
         minSdk = 29
         targetSdk = 35
-        versionCode = 36
-        versionName = "0.12.8"
+        versionCode = 37
+        versionName = "0.12.9"
     }
     buildTypes {
         getByName("release") { applicationIdSuffix = ".stable" }

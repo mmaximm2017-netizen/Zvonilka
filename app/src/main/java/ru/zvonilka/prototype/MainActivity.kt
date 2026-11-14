@@ -243,16 +243,16 @@ class MainActivity : ComponentActivity() {
         BackHandler(settings || selected!=null) { settings=false;selected=null }
         Box(Modifier.fillMaxSize()) {
         Scaffold(
-            topBar={ TopAppBar(
+            topBar={ if(!showGlassBar || tab!=0) TopAppBar(
                 colors=TopAppBarDefaults.topAppBarColors(containerColor=MaterialTheme.colorScheme.background),
-                title={ Text(if(settings) "Настройки" else if(selected!=null) "Контакт" else listOf("Недавние","Контакты","Клавиши")[tab],fontSize=24.sp,fontWeight=FontWeight.SemiBold) },
+                title={ Text(if(settings) "Настройки" else if(selected!=null) "Контакт" else listOf("Недавние","Контакты","Клавиши")[tab],fontSize=if(showGlassBar) 30.sp else 24.sp,fontWeight=FontWeight.Bold) },
                 navigationIcon={ if(settings||selected!=null) IconButton(onClick={settings=false;selected=null}) { Icon(Icons.Default.ArrowBack,"Назад") } },
                 actions={
                     if(tab==1 && selected==null && !settings) IconButton(onClick={editor(null)}) { Icon(Icons.Default.Add,"Создать контакт") }
                     IconButton(onClick={settings=!settings}) { Icon(Icons.Outlined.Settings,"Настройки") }
                 }
             ) },
-            bottomBar={}
+            bottomBar={if(showGlassBar) ClassicTabBar()}
         ) { padding->
             Column(Modifier.padding(padding).fillMaxSize().layerBackdrop(glassBackdrop)) {
                 if(loading) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -261,7 +261,7 @@ class MainActivity : ComponentActivity() {
                 when {
                     settings -> Settings()
                     selected!=null -> ContactCard(selected!!)
-                    tab==0 -> HistoryList(history,glassBackdrop)
+                    tab==0 -> HistoryList(history)
                     tab==1 -> {
                         OutlinedTextField(query,{query=it},Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp).height(52.dp),placeholder={Text("Имя или номер")},leadingIcon={Icon(Icons.Default.Search,null,Modifier.size(20.dp))},trailingIcon={if(query.isNotEmpty()) IconButton(onClick={query=""}){Icon(Icons.Default.Close,"Очистить поиск",Modifier.size(18.dp))}},shape=RoundedCornerShape(14.dp),colors=OutlinedTextFieldDefaults.colors(unfocusedContainerColor=MaterialTheme.colorScheme.surfaceVariant,focusedContainerColor=MaterialTheme.colorScheme.surface,unfocusedBorderColor=Color.Transparent),singleLine=true)
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
@@ -282,7 +282,7 @@ class MainActivity : ComponentActivity() {
                         val filtered=remember(visible,query) { visible.filter { NumberTools.matches(it.name,it.numbers,query) } }
                         val state=rememberLazyListState()
                         Row(Modifier.weight(1f)) {
-                            LazyColumn(state=state,modifier=Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=6.dp,bottom=110.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
+                            LazyColumn(state=state,modifier=Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=6.dp,bottom=10.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
                                 if(filtered.isEmpty()) item { EmptySection(if(query.isBlank()) "Здесь будут контакты" else "Ничего не найдено",if(query.isBlank()) "Добавьте первый контакт кнопкой +" else "Попробуйте другое имя или номер") }
                                 itemsIndexed(filtered,key={_,p->p.id}) { index,p->
                                     SwipeCall(shape=listRowShape(index==0,index==filtered.lastIndex),onCall={dial(p.primary)},onTap={selected=p}) {
@@ -306,7 +306,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        if(showGlassBar) GlassBottomBar(glassBackdrop,Modifier.align(Alignment.BottomCenter))
+
         }
         if(editing) Editor()
         simEditing?.let{(book,source)->SimEditor(book,source)}
@@ -315,62 +315,16 @@ class MainActivity : ComponentActivity() {
         error?.let { message->AlertDialog(onDismissRequest={error=null},title={Text("Звонилка")},text={Text(message)},confirmButton={TextButton(onClick={error=null}){Text("Понятно")}}) }
     }
 
-    @Composable private fun GlassBottomBar(backdrop:Backdrop,modifier:Modifier=Modifier) {
-        val dark=isSystemInDarkTheme()
-        val labels=listOf("Недавние","Контакты","Клавиши")
-        val icons=listOf(Icons.Outlined.History,Icons.Outlined.Contacts,Icons.Outlined.Dialpad)
-        Box(
-            modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal=12.dp,vertical=8.dp),
-            contentAlignment=Alignment.Center
-        ) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(70.dp)
-                    .drawBackdrop(
-                        backdrop=backdrop,
-                        shape={ AbsoluteRoundedCornerShape(30.dp) },
-                        effects={
-                            vibrancy()
-                            blur(12.dp.toPx())
-                            lens(18.dp.toPx(),14.dp.toPx(),depthEffect=true,chromaticAberration=true)
-                        },
-                        onDrawSurface={
-                            drawRect(if(dark) Color(0xFF07111F).copy(alpha=.28f) else Color.White.copy(alpha=.24f))
-                        }
-                    )
-                    .border(
-                        BorderStroke(1.dp,if(dark) Color.White.copy(alpha=.18f) else Color.White.copy(alpha=.72f)),
-                        AbsoluteRoundedCornerShape(30.dp)
-                    )
-                    .padding(5.dp),
-                verticalAlignment=Alignment.CenterVertically
-            ) {
-                icons.forEachIndexed { i,icon->
-                    val active=tab==i
-                    Box(
-                        Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(
-                            if(active) MaterialTheme.colorScheme.primaryContainer.copy(alpha=if(dark).42f else .38f) else Color.Transparent
-                        ).clickable {
-                            tab=i
-                            if(i==0) MissedCalls.clear(this@MainActivity)
-                        },
-                        contentAlignment=Alignment.Center
-                    ) {
-                        Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
-                            BadgedBox(badge={if(i==0 && missedCount>0) Badge { Text(if(missedCount>99)"99+" else missedCount.toString()) }}) {
-                                Icon(
-                                    icon,labels[i],Modifier.size(if(active)23.dp else 22.dp),
-                                    tint=if(active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.84f)
-                                )
-                            }
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                labels[i],fontSize=10.sp,
-                                fontWeight=if(active) FontWeight.SemiBold else FontWeight.Normal,
-                                color=if(active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=.84f)
-                            )
-                        }
+    @Composable private fun ClassicTabBar() {
+        Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
+            HorizontalDivider(thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant)
+            Row(Modifier.fillMaxWidth().height(54.dp)) {
+                listOf(Icons.Default.Schedule,Icons.Default.AccountCircle,Icons.Default.Dialpad).forEachIndexed { i,icon ->
+                    val label=listOf("Недавние","Контакты","Клавиши")[i]
+                    val tint=if(tab==i) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    Column(Modifier.weight(1f).fillMaxHeight().clickable { tab=i;if(i==0) MissedCalls.clear(this@MainActivity) },horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
+                        BadgedBox(badge={if(i==0 && missedCount>0) Badge {Text(if(missedCount>99)"99+" else missedCount.toString())}}) { Icon(icon,null,Modifier.size(25.dp),tint=tint) }
+                        Text(label,color=tint,fontSize=10.sp,lineHeight=14.sp,maxLines=1)
                     }
                 }
             }
@@ -400,7 +354,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun HistoryList(rows:List<HistoryRecord>,glassBackdrop:Backdrop) {
+    @Composable private fun HistoryList(rows:List<HistoryRecord>) {
         var expanded by remember { mutableStateOf<Long?>(null) }
         var chosen by remember { mutableStateOf(emptySet<Long>()) }
         var editMode by remember { mutableStateOf(false) }
@@ -412,57 +366,54 @@ class MainActivity : ComponentActivity() {
         val today=java.time.LocalDate.now(zone)
         val dates=remember(visible,zone) { visible.map { java.time.Instant.ofEpochMilli(it.date).atZone(zone).toLocalDate() } }
         Column {
-            Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=2.dp),verticalAlignment=Alignment.CenterVertically) {
-                Row(Modifier.widthIn(max=210.dp).clip(RoundedCornerShape(11.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(3.dp),horizontalArrangement=Arrangement.spacedBy(2.dp)) {
-                    listOf("Все","Пропущенные").forEachIndexed { index,label ->
+            Row(Modifier.fillMaxWidth().padding(horizontal=5.dp),verticalAlignment=Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { if(editMode) TextButton(enabled=chosen.isNotEmpty() && !loading,onClick={confirmDelete(chosen.toSet())}){Text("Удалить",fontSize=13.sp)} else IconButton(onClick={settings=true}){Icon(Icons.Outlined.Settings,"Настройки",tint=MaterialTheme.colorScheme.primary)} }
+                Row(Modifier.clip(RoundedCornerShape(9.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(2.dp)) {
+                    listOf("Все","Пропущ.").forEachIndexed { index,label ->
                         val active=missedOnly==(index==1)
-                        Surface(onClick={missedOnly=index==1},modifier=Modifier.width(if(index==0)76.dp else 112.dp),shape=RoundedCornerShape(9.dp),color=if(active) MaterialTheme.colorScheme.surface else Color.Transparent,shadowElevation=if(active) 1.dp else 0.dp) {
-                            Box(Modifier.heightIn(min=36.dp).padding(horizontal=4.dp,vertical=6.dp),contentAlignment=Alignment.Center) {
-                                Text(label,fontSize=12.sp,fontWeight=if(active) FontWeight.Medium else FontWeight.Normal,color=if(active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+                        Surface(onClick={missedOnly=index==1},shape=RoundedCornerShape(7.dp),color=if(active) MaterialTheme.colorScheme.surface else Color.Transparent,shadowElevation=if(active) 1.dp else 0.dp) {
+                            Box(Modifier.width(68.dp).height(30.dp),contentAlignment=Alignment.Center){Text(label,fontSize=13.sp,fontWeight=FontWeight.Medium)}
                         }
                     }
                 }
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick={editMode=!editMode;chosen=emptySet()}){Text(if(editMode) "Готово" else "Править",fontSize=13.sp)}
+                Box(Modifier.weight(1f),contentAlignment=Alignment.CenterEnd){TextButton(onClick={editMode=!editMode;chosen=emptySet()}){Text(if(editMode) "Готово" else "Править",fontSize=13.sp)}}
             }
+            Text("Недавние",Modifier.padding(start=16.dp,top=6.dp,bottom=8.dp),fontSize=34.sp,lineHeight=40.sp,letterSpacing=(-.8).sp,fontWeight=FontWeight.Bold)
             if(editMode) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),verticalAlignment=Alignment.CenterVertically) {
                 TextButton(onClick={chosen=visible.map{it.id}.toSet()}){Text("Выбрать все")}
-                TextButton(enabled=chosen.isNotEmpty() && !loading,onClick={confirmDelete(chosen.toSet())}){Text("Удалить (${chosen.size})",color=MaterialTheme.colorScheme.error)}
+                Text("Выбрано: ${chosen.size}",fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=16.dp,top=5.dp,bottom=110.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
+            LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=16.dp,top=5.dp,bottom=10.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
                 if(visible.isEmpty()) item { EmptySection(if(missedOnly) "Нет пропущенных" else "Пока ни одного вызова","Здесь будет ваша история звонков") }
                 itemsIndexed(visible,key={_,h->h.id}) { index,h->
                     val day=dates[index]
-                    val first=index==0 || dates[index-1]!=day
-                    val last=index==visible.lastIndex || dates[index+1]!=day
-                    val dayLabel=when(day) { today->"Сегодня";today.minusDays(1)->"Вчера";else->day.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy",Locale("ru"))) }
+        
+        
                     Column {
-                    if(first) Text(dayLabel,Modifier.padding(start=12.dp,top=if(index==0) 3.dp else 11.dp,bottom=6.dp),fontSize=12.sp,fontWeight=FontWeight.Medium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     val p=people.firstOrNull { it.numbers.any { n->NumberTools.key(n)==NumberTools.key(h.number) } }
                     val color=historyColor(h.type)
                     val kind=when(h.type) { CallLog.Calls.MISSED_TYPE->"Пропущенный";CallLog.Calls.OUTGOING_TYPE->"Исходящий";CallLog.Calls.REJECTED_TYPE->"Отклонённый";else->"Входящий" }
                     fun selectRow() { chosen=if(h.id in chosen) chosen-h.id else chosen+h.id }
-                    SwipeCall(shape=RoundedCornerShape(0.dp),containerColor=MaterialTheme.colorScheme.background,glassBackdrop=glassBackdrop,greenGlass=true,enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h}) {
+                    SwipeCall(shape=RoundedCornerShape(0.dp),containerColor=MaterialTheme.colorScheme.background,enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h}) {
                         Column(Modifier.fillMaxWidth()) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal=10.dp,vertical=9.dp)) {
+                        Column(Modifier.fillMaxWidth().then(if(editMode) Modifier.clickable {selectRow()} else Modifier).background(if(h.id in chosen) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).padding(horizontal=4.dp,vertical=7.dp)) {
                             Row(verticalAlignment=Alignment.CenterVertically) {
-                                if(editMode) Checkbox(checked=h.id in chosen,onCheckedChange={selectRow()})
-                                Photo(p,Modifier.size(40.dp).clip(CircleShape))
+                                if(editMode) IconButton(onClick={confirmDelete(setOf(h.id))}){Icon(Icons.Default.RemoveCircle,"Удалить вызов",tint=Red)}
+                                if(!editMode) Photo(p,Modifier.size(34.dp).clip(CircleShape))
                                 Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(p?.name ?: NumberTools.display(h.number).ifBlank { "Скрытый номер" },color=color,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     Row(verticalAlignment=Alignment.CenterVertically) {
                                         Icon(if(h.type==CallLog.Calls.OUTGOING_TYPE) Icons.Default.CallMade else if(h.type==CallLog.Calls.MISSED_TYPE) Icons.Default.CallMissed else Icons.Default.CallReceived,null,Modifier.size(13.dp),tint=color)
-                                        Spacer(Modifier.width(5.dp));Text(NumberTools.duration(h.seconds),fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
+                                        Spacer(Modifier.width(5.dp));Text(kind,fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
                                     }
                                 }
-                                Text(SimpleDateFormat("HH:mm",Locale.getDefault()).format(h.date),Modifier.padding(start=6.dp),fontSize=11.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                                IconButton(onClick={expanded=if(expanded==h.id) null else h.id},modifier=Modifier.size(40.dp)){Icon(Icons.Outlined.Info,"Сведения о вызове",tint=MaterialTheme.colorScheme.primary.copy(alpha=.8f),modifier=Modifier.size(19.dp))}
+                                Text(if(day==today) SimpleDateFormat("HH:mm",Locale.getDefault()).format(h.date) else if(day==today.minusDays(1)) "Вчера" else day.format(java.time.format.DateTimeFormatter.ofPattern(if(day.isAfter(today.minusDays(7))) "EEEE" else "dd.MM.yy",Locale("ru"))),Modifier.padding(start=6.dp),fontSize=13.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                if(!editMode) IconButton(onClick={expanded=if(expanded==h.id) null else h.id},modifier=Modifier.size(40.dp)){Icon(Icons.Outlined.Info,"Сведения о вызове",tint=MaterialTheme.colorScheme.primary.copy(alpha=.8f),modifier=Modifier.size(19.dp))}
                             }
                             if(expanded==h.id) {
                                 HorizontalDivider(Modifier.padding(vertical=8.dp),color=MaterialTheme.colorScheme.outlineVariant)
-                                Text("$kind · "+SimpleDateFormat("dd.MM.yyyy HH:mm:ss",Locale.getDefault()).format(h.date),style=MaterialTheme.typography.bodySmall)
+                                Text("$kind · ${NumberTools.duration(h.seconds)} · "+SimpleDateFormat("dd.MM.yyyy HH:mm:ss",Locale.getDefault()).format(h.date),style=MaterialTheme.typography.bodySmall)
                                 Row(Modifier.horizontalScroll(rememberScrollState())) {
                                     TextButton(onClick={dial(h.number)}) { Text("Позвонить") }
                                     TextButton(onClick={copy(h.number)}){Text("Копировать")}
@@ -471,7 +422,7 @@ class MainActivity : ComponentActivity() {
                                 TextButton(enabled=!loading,onClick={confirmDelete(setOf(h.id))}) { Icon(Icons.Default.Delete,null,Modifier.size(18.dp),tint=MaterialTheme.colorScheme.error);Spacer(Modifier.width(6.dp));Text("Удалить вызов",color=MaterialTheme.colorScheme.error) }
                             }
                         }
-                        if(!last) HorizontalDivider(Modifier.padding(start=60.dp),thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant)
+                        HorizontalDivider(Modifier.padding(start=60.dp),thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                     }
@@ -489,14 +440,14 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalFoundationApi::class)
     @Composable private fun Keypad() {
         var picked by remember { mutableStateOf(false) }
-        val matches=remember(number,people,picked) { if(number.isBlank()||picked) emptyList() else people.flatMap { p->p.numbers.filter { NumberTools.key(it).contains(NumberTools.key(number)) || NumberTools.t9(p.name).contains(number) }.map { p to it } }.take(4) }
+        val matches=remember(number,people,picked) { if(number.isBlank()||picked) emptyList() else people.flatMap { p->p.numbers.filter { NumberTools.key(it).contains(NumberTools.key(number)) || NumberTools.t9(p.name).contains(number) }.map { p to it } } }
         val exact=people.firstOrNull { it.numbers.any { n->NumberTools.key(n)==NumberTools.key(number) } }
         val labels=mapOf(
             '2' to "АБВГ\nABC", '3' to "ДЕЁЖЗ\nDEF", '4' to "ИЙКЛ\nGHI",
             '5' to "МНОП\nJKL", '6' to "РСТУ\nMNO", '7' to "ФХЦЧ\nPQRS",
             '8' to "ШЩЪЫ\nTUV", '9' to "ЬЭЮЯ\nWXYZ", '0' to "+"
         )
-        Column(Modifier.fillMaxSize().padding(horizontal=10.dp).padding(bottom=86.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().padding(horizontal=10.dp),horizontalAlignment=Alignment.CenterHorizontally) {
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth().height(54.dp),verticalAlignment=Alignment.CenterVertically) {
                 Box(
@@ -544,14 +495,14 @@ class MainActivity : ComponentActivity() {
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
                     line.forEach { digit->
                         Surface(
-                            Modifier.padding(vertical=6.dp).size(86.dp)
-                                .border(1.dp,MaterialTheme.colorScheme.outline.copy(alpha=.85f),CircleShape)
+                            Modifier.padding(vertical=4.dp).size(74.dp)
+                                .clip(CircleShape)
                                 .combinedClickable(onClick={
                                     number+=digit;picked=false
                                     if(getSharedPreferences("settings",0).getBoolean("haptic",true)) window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                                 },onLongClick={if(digit=='0') { number+="+";picked=false }}),
                             shape=CircleShape,
-                            color=Color.Transparent
+                            color=MaterialTheme.colorScheme.surfaceVariant
                         ) {
                             Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
                                 Text(digit.toString(),fontSize=36.sp,fontWeight=FontWeight.Normal,color=MaterialTheme.colorScheme.onSurface)
@@ -563,7 +514,7 @@ class MainActivity : ComponentActivity() {
             }
             val ignored=simRevision
             Spacer(Modifier.height(14.dp))
-            Box(Modifier.size(76.dp).clip(CircleShape).background(Green).combinedClickable(onClick={dial(number)},onLongClick={Dialing.choose(this@MainActivity,number.ifBlank { null }){simRevision++}}),contentAlignment=Alignment.Center) {
+            Box(Modifier.size(68.dp).clip(CircleShape).background(Green).combinedClickable(onClick={dial(number)},onLongClick={Dialing.choose(this@MainActivity,number.ifBlank { null }){simRevision++}}),contentAlignment=Alignment.Center) {
                 Icon(Icons.Default.Call,"Позвонить; удерживать для выбора SIM",Modifier.size(33.dp),tint=Color.White)
             }
             TextButton(onClick={Dialing.choose(this@MainActivity,number.ifBlank{null}){simRevision++}},contentPadding=PaddingValues(horizontal=10.dp,vertical=4.dp)) {
