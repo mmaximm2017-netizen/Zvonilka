@@ -426,7 +426,8 @@ class MainActivity : ComponentActivity() {
                     val p=people.firstOrNull { it.numbers.any { n->NumberTools.key(n)==NumberTools.key(h.number) } }
                     val displayName=p?.let{ContactDirectory.label(it,surname).text}
                     val color=historyColor(h.type)
-                    val kind=when(h.type) { CallLog.Calls.MISSED_TYPE->"Пропущенный";CallLog.Calls.OUTGOING_TYPE->"Исходящий";CallLog.Calls.REJECTED_TYPE->"Отклонённый";else->"Входящий" }
+                    val cancelled=h.type==CallLog.Calls.OUTGOING_TYPE && h.seconds==0L && CancelledCalls.contains(this@MainActivity,h.date,h.number)
+                    val kind=if(cancelled) "Отменённый" else when(h.type) { CallLog.Calls.MISSED_TYPE->"Пропущенный";CallLog.Calls.OUTGOING_TYPE->"Исходящий";CallLog.Calls.REJECTED_TYPE->"Отклонённый";else->"Входящий" }
                     fun selectRow() { chosen=if(h.id in chosen) chosen-h.id else chosen+h.id }
                     SwipeCall(shape=RoundedCornerShape(0.dp),containerColor=MaterialTheme.colorScheme.background,enabled=!editMode,onCall={dial(h.number)},onTap={if(editMode) selectRow() else expanded=if(expanded==h.id) null else h.id},onLong={contextCall=h}) {
                         Column(Modifier.fillMaxWidth()) {
@@ -434,7 +435,7 @@ class MainActivity : ComponentActivity() {
                             Row(verticalAlignment=Alignment.CenterVertically) {
                                 if(editMode) IconButton(onClick={confirmDelete(setOf(h.id))}){Icon(Icons.Default.RemoveCircle,"Удалить вызов",tint=Red)}
                                 val neutral=MaterialTheme.colorScheme.onSurfaceVariant
-                                val arrowColor=when(h.type) {
+                                val arrowColor=if(cancelled) neutral else when(h.type) {
                                     CallLog.Calls.OUTGOING_TYPE -> Color(0xFF219653)
                                     CallLog.Calls.INCOMING_TYPE -> Color(0xFF2684EA)
                                     CallLog.Calls.MISSED_TYPE -> Color(0xFFEA4545)

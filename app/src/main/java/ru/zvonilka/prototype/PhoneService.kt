@@ -224,6 +224,11 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
             CallStore.endedSeconds[key]=if(start>0)((System.currentTimeMillis()-start)/1000).coerceAtLeast(0) else 0
             while(CallStore.endedSeconds.size>8)CallStore.endedSeconds.remove(CallStore.endedSeconds.keys.first())
         }
+        if(call in ids && call.details.callDirection == Call.Details.DIRECTION_OUTGOING &&
+            call.details.connectTimeMillis <= 0 && call.details.disconnectCause.code in
+            listOf(DisconnectCause.LOCAL, DisconnectCause.CANCELED)) {
+            CancelledCalls.record(this, call.details.creationTimeMillis, call.details.handle?.schemeSpecificPart.orEmpty())
+        }
         if(call in ids) CallDiagnostics.record(this, "call_removed state=${call.state}")
         if(call.details.disconnectCause.code==DisconnectCause.MISSED && seenEnded.add(call)) MissedCalls.add(this,call.details.handle?.schemeSpecificPart.orEmpty())
         ids.remove(call)?.let { manager.cancel(it) }
