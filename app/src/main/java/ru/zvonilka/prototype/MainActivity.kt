@@ -255,6 +255,8 @@ class MainActivity : ComponentActivity() {
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable private fun App() {
+        val prefs=remember { getSharedPreferences("settings",0) }
+        var surname by remember { mutableStateOf(prefs.getBoolean("sortFamily",false)) }
         var query by rememberSaveable { mutableStateOf("") }
         val scope=rememberCoroutineScope()
         val glassBackdrop=rememberLayerBackdrop()
@@ -280,11 +282,9 @@ class MainActivity : ComponentActivity() {
                 when {
                     settings -> Settings()
                     selected!=null -> ContactCard(selected!!)
-                    tab==0 -> HistoryList(history)
+                    tab==0 -> HistoryList(history,surname)
                     tab==1 -> {
                         val accent=if(isSystemInDarkTheme()) Color(0xFF55CFA7) else Color(0xFF007E61)
-                        val prefs=remember {getSharedPreferences("settings",0)}
-                        var surname by remember {mutableStateOf(prefs.getBoolean("sortFamily",false))}
                         var options by remember {mutableStateOf(false)}
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
                             Box {IconButton(onClick={options=true}){Icon(Icons.Default.Tune,"Сортировка и источники",tint=accent)}
@@ -387,7 +387,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun HistoryList(rows:List<HistoryRecord>) {
+    @Composable private fun HistoryList(rows:List<HistoryRecord>,surname:Boolean) {
         var expanded by remember { mutableStateOf<Long?>(null) }
         var chosen by remember { mutableStateOf(emptySet<Long>()) }
         var editMode by remember { mutableStateOf(false) }
@@ -424,6 +424,7 @@ class MainActivity : ComponentActivity() {
         
                     Column {
                     val p=people.firstOrNull { it.numbers.any { n->NumberTools.key(n)==NumberTools.key(h.number) } }
+                    val displayName=p?.let{ContactDirectory.label(it,surname).text}
                     val color=historyColor(h.type)
                     val kind=when(h.type) { CallLog.Calls.MISSED_TYPE->"Пропущенный";CallLog.Calls.OUTGOING_TYPE->"Исходящий";CallLog.Calls.REJECTED_TYPE->"Отклонённый";else->"Входящий" }
                     fun selectRow() { chosen=if(h.id in chosen) chosen-h.id else chosen+h.id }
@@ -432,10 +433,10 @@ class MainActivity : ComponentActivity() {
                         Column(Modifier.fillMaxWidth().then(if(editMode) Modifier.clickable {selectRow()} else Modifier).background(if(h.id in chosen) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).padding(horizontal=4.dp,vertical=7.dp)) {
                             Row(verticalAlignment=Alignment.CenterVertically) {
                                 if(editMode) IconButton(onClick={confirmDelete(setOf(h.id))}){Icon(Icons.Default.RemoveCircle,"Удалить вызов",tint=Red)}
-                                if(!editMode) Photo(p,Modifier.size(34.dp).clip(CircleShape))
+                                if(!editMode) Photo(p,Modifier.size(34.dp).clip(CircleShape),initialsName=displayName)
                                 Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(p?.name ?: NumberTools.display(h.number).ifBlank { "Скрытый номер" },color=color,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                    Text(displayName ?: NumberTools.display(h.number).ifBlank { "Скрытый номер" },color=color,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     Row(verticalAlignment=Alignment.CenterVertically) {
                                         Icon(if(h.type==CallLog.Calls.OUTGOING_TYPE) Icons.Default.CallMade else if(h.type==CallLog.Calls.MISSED_TYPE) Icons.Default.CallMissed else Icons.Default.CallReceived,null,Modifier.size(13.dp),tint=color)
                                         Spacer(Modifier.width(5.dp));Text(kind,fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
