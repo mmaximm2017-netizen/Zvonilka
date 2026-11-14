@@ -193,8 +193,23 @@ class MainActivity : ComponentActivity() {
     }
     private fun dial(value:String)=Dialing.place(this,value) { setup() }
     private fun editorLocal(p:PersonRecord?) { edit=p;photoDraft=p?.photo;photoOriginal=null;cropSource=null;changedPhoto=false;editing=true }
+    private var pendingContactWrite:(()->Unit)?=null
+    private val contactPermission=registerForActivityResult(ActivityResultContracts.RequestPermission()){ granted->
+        val action=pendingContactWrite;pendingContactWrite=null
+        if(granted) action?.invoke() else toast("Для изменения контакта разрешите доступ к контактам в настройках приложения")
+    }
+    private fun canWrite(action:()->Unit):Boolean {
+        if(data.allowed(Manifest.permission.WRITE_CONTACTS)) return true
+        pendingContactWrite=action;contactPermission.launch(Manifest.permission.WRITE_CONTACTS);return false
+    }
+    private fun editAccount(p:PersonRecord){
+        if(p.readOnly){toast("Этот аккаунт разрешает только чтение");return}
+        val uri=ContentUris.withAppendedId(android.provider.ContactsContract.Contacts.CONTENT_URI,p.contactId)
+        try { startActivity(Intent(Intent.ACTION_EDIT,uri).putExtra("finishActivityOnSaveCompleted",true)) } catch(_:ActivityNotFoundException){toast("Нет системного редактора контактов")}
+    }
     private fun editor(p:PersonRecord?) {
-        if(p?.writableLocal==false) { toast("Контакт аккаунта доступен только для просмотра");return }
+        if(!canWrite { editor(p) })return
+        if(p?.readOnly==true && p.simSources.isEmpty()){toast("Запись доступна только для чтения");return}
         if(p==null) {
             lifecycleScope.launch {
                 val books=withContext(Dispatchers.IO){data.sim.books()}
@@ -203,16 +218,16 @@ class MainActivity : ComponentActivity() {
                     .setItems((listOf("Телефон")+books.map{it.label}).toTypedArray()){_,i->if(i==0)editorLocal(null) else simEditing=books[i-1] to null}.setNegativeButton("Отмена",null).show()
             };return
         }
-        if(p.simSources.isEmpty()) {editorLocal(p);return}
+        if(p.simSources.isEmpty()) {if(p.writableLocal)editorLocal(p) else editAccount(p);return}
         val local=p.id>=0
         val labels=(if(local)listOf("Телефон")else emptyList())+p.simSources.map{it.book.label+" · "+it.name}
         android.app.AlertDialog.Builder(this).setTitle("Какую запись изменить?").setItems(labels.toTypedArray()){_,i->
-            if(local && i==0)editorLocal(p) else p.simSources[i-(if(local)1 else 0)].let{simEditing=it.book to it}
+            if(local && i==0){if(!p.writableLocal || p.readOnly) editAccount(p) else editorLocal(p)} else p.simSources[i-(if(local)1 else 0)].let{simEditing=it.book to it}
         }.setNegativeButton("Отмена",null).show()
     }
     private fun deletePerson(p:PersonRecord) {
-        if(!p.writableLocal) { toast("Контакт аккаунта доступен только для просмотра");return }
-        fun local(){confirmation="Удалить ${p.name} из памяти телефона?" to {selected=null;work{data.deleteContact(p.id)}}}
+        if(!canWrite { deletePerson(p) })return
+        fun local(){if(p.readOnly){toast("Запись доступна только для чтения");return};confirmation= if(p.writableLocal) "Удалить ${p.name} из памяти телефона?" to {selected=null;work{data.deleteContact(p.id)}} else "Удалить ${p.name} из аккаунта? Удаление может синхронизироваться с другими устройствами." to {selected=null;work{data.deleteAccountRecord(p)}}}
         fun sim(source:SimSource){confirmation="Удалить ${source.name} с ${source.book.label}?" to {selected=null;work{data.sim.delete(source)}}}
         if(p.simSources.isEmpty()){local();return}
         val hasLocal=p.id>=0
@@ -227,7 +242,7 @@ class MainActivity : ComponentActivity() {
             OutlinedTextField(name,{name=it},label={Text("Имя")},enabled=!loading)
             OutlinedTextField(num,{num=NumberTools.clean(it)},label={Text("Номер")},enabled=!loading,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Phone))
         }},confirmButton={TextButton(enabled=!loading && name.isNotBlank() && num.isNotBlank(),onClick={
-            lifecycleScope.launch {loading=true;runCatching{withContext(Dispatchers.IO){data.sim.save(book,source,name.trim(),num)}}.onSuccess{simEditing=null}.onFailure{error=it.message ?: "SIM не сохранила контакт"};refresh()}
+            lifecycleScope.launch {loading=true;runCatching{withContext(Dispatchers.IO){data.sim.save(book,source,name.trim(),num)}}.onSuccess{simEditing=null}.onFailure{error=it.message ?: "SIM не сохранила контакт"};loading=false;refresh()}
         }){Text("Сохранить")}},dismissButton={TextButton(enabled=!loading,onClick={simEditing=null}){Text("Отмена")}})
     }
     private fun copy(value:String) {
@@ -243,13 +258,13 @@ class MainActivity : ComponentActivity() {
         BackHandler(settings || selected!=null) { settings=false;selected=null }
         Box(Modifier.fillMaxSize()) {
         Scaffold(
-            topBar={ if(!showGlassBar || tab!=0) TopAppBar(
+            topBar={ if(!showGlassBar || tab==2) TopAppBar(
                 colors=TopAppBarDefaults.topAppBarColors(containerColor=MaterialTheme.colorScheme.background),
                 title={ Text(if(settings) "Настройки" else if(selected!=null) "Контакт" else listOf("Недавние","Контакты","Клавиши")[tab],fontSize=if(showGlassBar) 30.sp else 24.sp,fontWeight=FontWeight.Bold) },
                 navigationIcon={ if(settings||selected!=null) IconButton(onClick={settings=false;selected=null}) { Icon(Icons.Default.ArrowBack,"Назад") } },
                 actions={
                     if(tab==1 && selected==null && !settings) IconButton(onClick={editor(null)}) { Icon(Icons.Default.Add,"Создать контакт") }
-                    IconButton(onClick={settings=!settings}) { Icon(Icons.Outlined.Settings,"Настройки") }
+                    if(selected!=null && !settings) TextButton(onClick={selected?.let(::editor)}){Text("Править")} else IconButton(onClick={settings=!settings}) { Icon(Icons.Outlined.Settings,"Настройки") }
                 }
             ) },
             bottomBar={if(showGlassBar) ClassicTabBar()}
@@ -263,14 +278,23 @@ class MainActivity : ComponentActivity() {
                     selected!=null -> ContactCard(selected!!)
                     tab==0 -> HistoryList(history)
                     tab==1 -> {
-                        OutlinedTextField(query,{query=it},Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp).height(52.dp),placeholder={Text("Имя или номер")},leadingIcon={Icon(Icons.Default.Search,null,Modifier.size(20.dp))},trailingIcon={if(query.isNotEmpty()) IconButton(onClick={query=""}){Icon(Icons.Default.Close,"Очистить поиск",Modifier.size(18.dp))}},shape=RoundedCornerShape(14.dp),colors=OutlinedTextFieldDefaults.colors(unfocusedContainerColor=MaterialTheme.colorScheme.surfaceVariant,focusedContainerColor=MaterialTheme.colorScheme.surface,unfocusedBorderColor=Color.Transparent),singleLine=true)
-                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceEvenly) {
-                            listOf("Телефон","SIM","Все вместе").forEach { label ->
-                                FilterChip(selected=source==label,onClick={
-                                    source=label
-                                    getSharedPreferences("settings",0).edit().putString("contactSource",label).apply()
-                                },label={Text(label)})
+                        val accent=if(isSystemInDarkTheme()) Color(0xFF55CFA7) else Color(0xFF007E61)
+                        val prefs=remember {getSharedPreferences("settings",0)}
+                        var surname by remember {mutableStateOf(prefs.getBoolean("sortFamily",false))}
+                        var options by remember {mutableStateOf(false)}
+                        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){
+                            Box {IconButton(onClick={options=true}){Icon(Icons.Default.Tune,"Сортировка и источники",tint=accent)}
+                                DropdownMenu(options,{options=false}){
+                                    listOf(false to "По имени",true to "По фамилии").forEach{(value,label)->DropdownMenuItem(text={Text((if(value==surname)"✓ " else "")+label)},onClick={surname=value;prefs.edit().putBoolean("sortFamily",value).apply();options=false})}
+                                    HorizontalDivider()
+                                    listOf("Телефон","SIM","Все вместе").forEach{label->DropdownMenuItem(text={Text((if(source==label)"✓ " else "")+label)},onClick={source=label;prefs.edit().putString("contactSource",label).apply();options=false})}
+                                }
                             }
+                            Text(if(source=="Все вместе")"Все" else source,Modifier.weight(1f),textAlign=androidx.compose.ui.text.style.TextAlign.Center,fontSize=20.sp,fontWeight=FontWeight.SemiBold)
+                            IconButton(onClick={editor(null)}){Icon(Icons.Default.Add,"Создать контакт",Modifier.size(30.dp),tint=accent)}
+                        }
+                        Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp)){
+                            androidx.compose.foundation.text.BasicTextField(query,{query=it},Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surface).padding(8.dp),singleLine=true,textStyle=androidx.compose.ui.text.TextStyle(fontSize=17.sp,color=MaterialTheme.colorScheme.onSurface),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=if(query.isEmpty()) Alignment.Center else Alignment.CenterStart){if(query.isEmpty()) Row(verticalAlignment=Alignment.CenterVertically){Icon(Icons.Default.Search,null,Modifier.size(18.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant);Text(" Поиск",color=MaterialTheme.colorScheme.onSurfaceVariant)};inner()}})
                         }
                         val visible=remember(people,source) {
                             when(source) {
@@ -279,25 +303,34 @@ class MainActivity : ComponentActivity() {
                                 else -> people
                             }
                         }
-                        val filtered=remember(visible,query) { visible.filter { NumberTools.matches(it.name,it.numbers,query) } }
+                        fun sortName(p:PersonRecord):String = if(surname) p.family.ifBlank {if(p.given.isBlank()) p.name.trim().substringAfterLast(' ') else p.name} else p.given.ifBlank {p.name}
+                        val groups=remember(visible,query,surname){
+                            val collator=java.text.Collator.getInstance(Locale("ru"))
+                            visible.filter{NumberTools.matches(it.name,it.numbers,query)}.sortedWith {a,b->val cmp=collator.compare(sortName(a),sortName(b));if(cmp==0) collator.compare(a.name,b.name) else cmp}.groupBy{sortName(it).trim().firstOrNull()?.takeIf(Char::isLetter)?.uppercaseChar() ?: '#'}
+                        }
                         val state=rememberLazyListState()
-                        Row(Modifier.weight(1f)) {
-                            LazyColumn(state=state,modifier=Modifier.weight(1f),contentPadding=PaddingValues(start=16.dp,end=6.dp,bottom=10.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
-                                if(filtered.isEmpty()) item { EmptySection(if(query.isBlank()) "Здесь будут контакты" else "Ничего не найдено",if(query.isBlank()) "Добавьте первый контакт кнопкой +" else "Попробуйте другое имя или номер") }
-                                itemsIndexed(filtered,key={_,p->p.id}) { index,p->
-                                    SwipeCall(shape=listRowShape(index==0,index==filtered.lastIndex),onCall={dial(p.primary)},onTap={selected=p}) {
-                                        Column { PersonRow(p);if(index!=filtered.lastIndex) HorizontalDivider(Modifier.padding(start=62.dp),thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant) }
+                        LaunchedEffect(query,surname,source){state.scrollToItem(0)}
+                        Row(Modifier.weight(1f)){
+                            LazyColumn(state=state,modifier=Modifier.weight(1f)){
+                                if(groups.isEmpty()) item{EmptySection("Нет контактов",if(query.isBlank()) "Добавьте контакт кнопкой +" else "Измените запрос")}
+                                groups.forEach{(letter,records)->
+                                    item(key="letter$letter"){Text(letter.toString(),Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal=16.dp,vertical=2.dp),fontSize=16.sp,fontWeight=FontWeight.Bold)}
+                                    items(records,key={it.id}){p->
+                                        SwipeCall(shape=RoundedCornerShape(0.dp),onTap={selected=p},onCall={dial(p.primary)}){
+                                            Column(Modifier.fillMaxWidth().padding(start=16.dp)){
+                                                val emphasis=sortName(p)
+                                                val pos=p.name.indexOf(emphasis,ignoreCase=true)
+                                                Text(androidx.compose.ui.text.buildAnnotatedString{append(p.name);if(pos>=0)addStyle(androidx.compose.ui.text.SpanStyle(fontWeight=FontWeight.Bold),pos,pos+emphasis.length)},Modifier.padding(vertical=11.dp),fontSize=18.sp)
+                                                HorizontalDivider(thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant)
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            val alphabet="АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯABCDEFGHIJKLMNOPQRSTUVWXYZ#"
-                            val letters=alphabet.filter { ch->filtered.any { p->if(ch=='#') p.name.firstOrNull()?.isLetter()!=true else p.name.startsWith(ch.toString(),true) } }
-                            Column(Modifier.width(24.dp).padding(top=6.dp).verticalScroll(rememberScrollState()),horizontalAlignment=Alignment.CenterHorizontally) {
-                                letters.forEach { ch->
-                                    Text(ch.toString(),fontSize=9.sp,color=MaterialTheme.colorScheme.primary.copy(alpha=.8f),modifier=Modifier.clickable {
-                                        val i=filtered.indexOfFirst { p->if(ch=='#') p.name.firstOrNull()?.isLetter()!=true else p.name.startsWith(ch.toString(),true) }
-                                        if(i>=0) scope.launch { state.animateScrollToItem(i) }
-                                    }.padding(horizontal=4.dp,vertical=2.5.dp))
+                            Column(Modifier.width(28.dp).verticalScroll(rememberScrollState()),horizontalAlignment=Alignment.CenterHorizontally){
+                                var start=0
+                                groups.forEach{(letter,records)->val target=start;start+=records.size+1
+                                    Text(letter.toString(),Modifier.clickable{scope.launch{state.scrollToItem(target)}}.padding(horizontal=6.dp,vertical=1.dp),fontSize=12.sp,lineHeight=15.sp,color=accent,fontWeight=FontWeight.Bold)
                                 }
                             }
                         }
@@ -564,6 +597,7 @@ class MainActivity : ComponentActivity() {
                             .onSuccess { if(it!=null){cropSource=it} }.onFailure{error="Не удалось открыть фото"}
                     }
                 }) { Text("Настроить кадр звонка") }
+                if(photoDraft!=null) TextButton(onClick={photoDraft=null;photoOriginal=null;changedPhoto=true}){Text("Удалить фото",color=MaterialTheme.colorScheme.error)}
                 OutlinedTextField(name,{name=it},label={Text("Имя")},singleLine=true)
                 nums.forEachIndexed { i,n->Row(verticalAlignment=Alignment.CenterVertically) {
                     OutlinedTextField(n,{value->nums=nums.toMutableList().also{it[i]=NumberTools.clean(value)}},Modifier.weight(1f),label={Text(if(i==0) "Основной номер" else "Номер")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Phone))
@@ -574,7 +608,7 @@ class MainActivity : ComponentActivity() {
             }
         },confirmButton={TextButton(enabled=!loading && name.isNotBlank() && nums.any{it.isNotBlank()},onClick={
             val id=edit?.id?.takeIf{it>=0};val photo=photoDraft;val change=changedPhoto
-            lifecycleScope.launch { loading=true;runCatching{withContext(Dispatchers.IO){data.save(id,name,nums,photo,change,photoOriginal)}}.onSuccess{editing=false}.onFailure{error=it.message};refresh() }
+            lifecycleScope.launch { loading=true;runCatching{withContext(Dispatchers.IO){data.save(id,name,nums,photo,change,photoOriginal)}}.onSuccess{editing=false}.onFailure{error=it.message};loading=false;refresh() }
         }){Text("Сохранить")}},dismissButton={TextButton(onClick={editing=false}){Text("Отмена")}})
     }
 
