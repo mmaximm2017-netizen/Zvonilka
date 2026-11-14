@@ -303,10 +303,11 @@ class MainActivity : ComponentActivity() {
                         val directory=remember(people,source){directoryRows()}
                         val visible=remember(directory){directory.map { it.first() }}
                         val searchable=remember(directory){directory.associateBy {it.first().id}}
-                        fun sortName(p:PersonRecord):String = if(surname) p.family.ifBlank {if(p.given.isBlank()) p.name.trim().substringAfterLast(' ') else p.name} else p.given.ifBlank {p.name}
+                        val labels=remember(directory,surname){directory.flatten().associate{it.id to ContactDirectory.label(it,surname)}}
+                        fun sortName(p:PersonRecord)=labels.getValue(p.id).first
                         val groups=remember(directory,query,surname){
                             val collator=java.text.Collator.getInstance(Locale("ru"))
-                            visible.filter{row->searchable[row.id].orEmpty().any{NumberTools.matches(it.name,it.numbers,query)}}.sortedWith {a,b->val cmp=collator.compare(sortName(a),sortName(b));if(cmp==0) collator.compare(a.name,b.name) else cmp}.groupBy{sortName(it).trim().firstOrNull()?.takeIf(Char::isLetter)?.uppercaseChar() ?: '#'}
+                            visible.filter{row->searchable[row.id].orEmpty().any{NumberTools.matches(it.name,it.numbers,query) || NumberTools.matches(labels.getValue(it.id).text,it.numbers,query)}}.sortedWith {a,b->val cmp=collator.compare(sortName(a),sortName(b));if(cmp==0) collator.compare(a.name,b.name) else cmp}.groupBy{sortName(it).trim().firstOrNull()?.takeIf(Char::isLetter)?.uppercaseChar() ?: '#'}
                         }
                         val state=rememberLazyListState()
                         LaunchedEffect(query,surname,source){state.scrollToItem(0)}
@@ -318,9 +319,8 @@ class MainActivity : ComponentActivity() {
                                     items(records,key={it.id}){p->
                                         SwipeCall(shape=RoundedCornerShape(0.dp),onTap={selected=p},onCall={dial(p.primary)}){
                                             Column(Modifier.fillMaxWidth().padding(start=16.dp)){
-                                                val emphasis=sortName(p)
-                                                val pos=p.name.indexOf(emphasis,ignoreCase=true)
-                                                Text(androidx.compose.ui.text.buildAnnotatedString{append(p.name);if(pos>=0)addStyle(androidx.compose.ui.text.SpanStyle(fontWeight=FontWeight.Bold),pos,pos+emphasis.length)},Modifier.padding(vertical=11.dp),fontSize=18.sp)
+                                                val label=labels.getValue(p.id)
+                                                Text(androidx.compose.ui.text.buildAnnotatedString{append(label.text);addStyle(androidx.compose.ui.text.SpanStyle(fontWeight=FontWeight.Bold),0,label.first.length)},Modifier.padding(vertical=11.dp),fontSize=18.sp)
                                                 HorizontalDivider(thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant)
                                             }
                                         }

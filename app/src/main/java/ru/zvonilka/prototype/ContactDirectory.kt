@@ -3,6 +3,19 @@ package ru.zvonilka.prototype
 import java.util.Locale
 
 object ContactDirectory {
+    data class Label(val text:String, val first:String)
+    fun label(p:PersonRecord, surname:Boolean):Label {
+        val words=p.name.trim().split(Regex("\\s+")).filter(String::isNotBlank)
+        if(words.isEmpty()) return Label(p.name,p.name)
+        val field=(if(surname) p.family else p.given).trim()
+        val tokens=if(field.isNotEmpty()) field.split(Regex("\\s+")) else listOf(
+            if(surname && p.given.isBlank() && words.last().any(Char::isLetter)) words.last() else words.first()
+        )
+        val at=words.windowed(tokens.size).indexOfFirst {part->part.zip(tokens).all{(a,b)->a.equals(b,true)}}
+        val first=if(at>=0) words.subList(at,at+tokens.size).joinToString(" ") else tokens.joinToString(" ")
+        val rest=words.filterIndexed{index,_->at<0 || index !in at until at+tokens.size}
+        return Label((listOf(first)+rest).joinToString(" "),first)
+    }
     private fun phoneKey(value:String):String {
         val clean=androidFreeNormalize(value)
         return if(clean.length==11 && clean.startsWith("8") && clean.all(Char::isDigit)) "7"+clean.drop(1)
