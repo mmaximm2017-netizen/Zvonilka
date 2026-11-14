@@ -91,7 +91,7 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
         Column(Modifier.padding(15.dp),verticalArrangement=Arrangement.spacedBy(8.dp),content=content)
     }
 }
-@Composable fun Photo(person:PersonRecord?,modifier:Modifier=Modifier,full:Boolean=false,initialsName:String?=null,onInfo:((String)->Unit)?=null) {
+@Composable fun Photo(person:PersonRecord?,modifier:Modifier=Modifier,full:Boolean=false,initialsName:String?=null,showPlaceholder:Boolean=true,onInfo:((String)->Unit)?=null) {
     val thumbnail=remember(person?.id,person?.photo) { person?.photo?.let { BitmapFactory.decodeByteArray(it,0,it.size)?.asImageBitmap() } }
     val context=LocalContext.current.applicationContext
     // Key the state as well as the coroutine so a different caller never sees the old photo.
@@ -106,6 +106,7 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
         loaded
     }
     val bitmap=large ?: thumbnail
+    if(bitmap==null && !showPlaceholder) return
     Box(modifier.background(Brush.linearGradient(if(full) listOf(Color(0xFF123D70),Color(0xFF245F97)) else listOf(MaterialTheme.colorScheme.primaryContainer,MaterialTheme.colorScheme.secondaryContainer))),contentAlignment=Alignment.Center) {
         if(bitmap!=null) Image(bitmap,null,Modifier.fillMaxSize(),contentScale=ContentScale.Crop,filterQuality=FilterQuality.High)
         else if(person==null) Icon(Icons.Outlined.Person,"Нет фото",Modifier.size(if(full) 96.dp else 28.dp),tint=if(full) Color.White else MaterialTheme.colorScheme.primary)

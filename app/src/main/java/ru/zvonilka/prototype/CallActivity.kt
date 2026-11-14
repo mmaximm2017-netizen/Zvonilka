@@ -90,7 +90,7 @@ class CallActivity : ComponentActivity() {
         val ringing=call?.state==Call.STATE_RINGING
         Box(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().layerBackdrop(glassBackdrop).background(Brush.verticalGradient(listOf(Color(0xFF34536B),Color(0xFF182A40),Color(0xFF101722))))) {
-                if(person!=null) Photo(person,Modifier.fillMaxSize(),true)
+                if(person!=null) Photo(person,Modifier.fillMaxSize(),full=true,showPlaceholder=false)
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x70070D18),Color(0x20070D18),Color(0xD909101B)))))
             }
             BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
