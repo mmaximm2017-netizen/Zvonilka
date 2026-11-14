@@ -227,7 +227,11 @@ class MainActivity : ComponentActivity() {
     }
     private fun deletePerson(p:PersonRecord) {
         if(!canWrite { deletePerson(p) })return
-        fun local(){if(p.readOnly){toast("Запись доступна только для чтения");return};confirmation= if(p.writableLocal) "Удалить ${p.name} из памяти телефона?" to {selected=null;work{data.deleteContact(p.id)}} else "Удалить ${p.name} из аккаунта? Удаление может синхронизироваться с другими устройствами." to {selected=null;work{data.deleteAccountRecord(p)}}}
+        fun local(){if(!p.writableLocal && !p.writeFlagKnown){
+            confirmation="Телефон не сообщает права аккаунта. Открыть системную карточку для удаления?" to {
+                try { startActivity(Intent(Intent.ACTION_VIEW,ContentUris.withAppendedId(android.provider.ContactsContract.Contacts.CONTENT_URI,p.contactId))) } catch(_:ActivityNotFoundException){toast("Системная карточка недоступна")}
+            };return
+        };if(p.readOnly){toast("Запись доступна только для чтения");return};confirmation= if(p.writableLocal) "Удалить ${p.name} из памяти телефона?" to {selected=null;work{data.deleteContact(p.id)}} else "Удалить ${p.name} из аккаунта? Удаление может синхронизироваться с другими устройствами." to {selected=null;work{data.deleteAccountRecord(p)}}}
         fun sim(source:SimSource){confirmation="Удалить ${source.name} с ${source.book.label}?" to {selected=null;work{data.sim.delete(source)}}}
         if(p.simSources.isEmpty()){local();return}
         val hasLocal=p.id>=0

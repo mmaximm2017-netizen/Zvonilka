@@ -10,7 +10,7 @@ import java.text.Collator
 import java.util.Locale
 
 // A record belongs to one local RawContact, never to an aggregated cloud contact.
-data class PersonRecord(val id: Long, val name: String, val numbers: List<String>, val photo: ByteArray? = null, val simSources:List<SimSource> = emptyList(), val writableLocal:Boolean = true, val given:String="", val family:String="", val contactId:Long=0, val readOnly:Boolean=false) {
+data class PersonRecord(val id: Long, val name: String, val numbers: List<String>, val photo: ByteArray? = null, val simSources:List<SimSource> = emptyList(), val writableLocal:Boolean = true, val given:String="", val family:String="", val contactId:Long=0, val readOnly:Boolean=false, val writeFlagKnown:Boolean=true) {
     val primary get() = numbers.firstOrNull().orEmpty()
 }
 data class HistoryRecord(val id: Long, val number: String, val type: Int, val date: Long, val seconds: Long, val accountId: String?)
@@ -28,12 +28,20 @@ class PhoneData(private val context: Context) {
         val simAccounts = if(android.os.Build.VERSION.SDK_INT >= 31)
             runCatching { CC.SimContacts.getSimAccounts(cr).map { it.accountName to it.accountType }.toSet() }.getOrDefault(emptySet())
         else emptySet()
-        cr.query(CC.RawContacts.CONTENT_URI, arrayOf(CC.RawContacts._ID, CC.RawContacts.ACCOUNT_NAME, CC.RawContacts.ACCOUNT_TYPE,CC.RawContacts.CONTACT_ID,CC.RawContacts.RAW_CONTACT_IS_READ_ONLY),
-            "${CC.RawContacts.DELETED} = 0", null, null)?.use { c ->
+        // Let each provider return its supported columns. Some OEMs reject an
+        // explicit request for RAW_CONTACT_IS_READ_ONLY before returning a cursor.
+        var writeFlagKnown=false
+        cr.query(CC.RawContacts.CONTENT_URI, null, "${CC.RawContacts.DELETED} = 0", null, null)?.use { c ->
+            val idCol=c.getColumnIndexOrThrow(CC.RawContacts._ID)
+            val nameCol=c.getColumnIndexOrThrow(CC.RawContacts.ACCOUNT_NAME)
+            val typeCol=c.getColumnIndexOrThrow(CC.RawContacts.ACCOUNT_TYPE)
+            val aggregateCol=c.getColumnIndexOrThrow(CC.RawContacts.CONTACT_ID)
+            val flagCol=c.getColumnIndex(CC.RawContacts.RAW_CONTACT_IS_READ_ONLY)
+            writeFlagKnown=flagCol>=0
             while(c.moveToNext()) {
-                val id=c.getLong(0); val name=c.getString(1); val type=c.getString(2)
+                val id=c.getLong(idCol); val name=c.getString(nameCol); val type=c.getString(typeCol)
                 if((name to type) in simAccounts || type in setOf("vnd.sec.contact.sim","vnd.sec.contact.sim2","com.android.sim")) continue
-                aggregate[id]=c.getLong(3); if(c.getInt(4)!=0) readOnly.add(id)
+                aggregate[id]=c.getLong(aggregateCol); if(flagCol>=0 && c.getInt(flagCol)!=0) readOnly.add(id)
                 ids.add(id)
                 if(type==null || type=="vnd.sec.contact.phone") writable.add(id)
             }
@@ -54,7 +62,7 @@ class PhoneData(private val context: Context) {
                     }
                 }
             }
-            map.forEach { (id,a) -> if(id in writable || a.nums.isNotEmpty()) result.add(PersonRecord(id,a.name.ifBlank { "Без имени" },a.nums.sortedByDescending { it.first }.map { it.second }.distinctBy(NumberTools::key),a.photo,writableLocal=id in writable,given=a.given,family=a.family,contactId=aggregate[id] ?: 0,readOnly=id in readOnly)) }
+            map.forEach { (id,a) -> if(id in writable || a.nums.isNotEmpty()) result.add(PersonRecord(id,a.name.ifBlank { "Без имени" },a.nums.sortedByDescending { it.first }.map { it.second }.distinctBy(NumberTools::key),a.photo,writableLocal=id in writable,given=a.given,family=a.family,contactId=aggregate[id] ?: 0,readOnly=id in readOnly,writeFlagKnown=writeFlagKnown)) }
         }
         val collator=Collator.getInstance(Locale("ru"))
         return result.sortedWith { a,b -> collator.compare(a.name,b.name) }
@@ -96,7 +104,7 @@ class PhoneData(private val context: Context) {
         return savedId
     }
     fun deleteAccountRecord(p:PersonRecord) {
-        require(!p.writableLocal && !p.readOnly && p.id>=0)
+        require(p.writeFlagKnown && !p.writableLocal && !p.readOnly && p.id>=0)
         check(cr.delete(CC.RawContacts.CONTENT_URI,"${CC.RawContacts._ID}=? AND ${CC.RawContacts.CONTACT_ID}=? AND ${CC.RawContacts.RAW_CONTACT_IS_READ_ONLY}=0",arrayOf(p.id.toString(),p.contactId.toString()))==1){"Аккаунт не разрешил удалить контакт"}
         CallPhotoStore.remove(context,p.id)
     }
