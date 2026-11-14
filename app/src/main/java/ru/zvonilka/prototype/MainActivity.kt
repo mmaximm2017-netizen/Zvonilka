@@ -433,8 +433,6 @@ class MainActivity : ComponentActivity() {
                         Column(Modifier.fillMaxWidth().then(if(editMode) Modifier.clickable {selectRow()} else Modifier).background(if(h.id in chosen) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).padding(horizontal=4.dp,vertical=7.dp)) {
                             Row(verticalAlignment=Alignment.CenterVertically) {
                                 if(editMode) IconButton(onClick={confirmDelete(setOf(h.id))}){Icon(Icons.Default.RemoveCircle,"Удалить вызов",tint=Red)}
-                                if(!editMode) Photo(p,Modifier.size(34.dp).clip(CircleShape),initialsName=displayName)
-                                Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(displayName ?: NumberTools.display(h.number).ifBlank { "Скрытый номер" },color=color,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     Row(verticalAlignment=Alignment.CenterVertically) {
@@ -456,7 +454,7 @@ class MainActivity : ComponentActivity() {
                                 TextButton(enabled=!loading,onClick={confirmDelete(setOf(h.id))}) { Icon(Icons.Default.Delete,null,Modifier.size(18.dp),tint=MaterialTheme.colorScheme.error);Spacer(Modifier.width(6.dp));Text("Удалить вызов",color=MaterialTheme.colorScheme.error) }
                             }
                         }
-                        HorizontalDivider(Modifier.padding(start=60.dp),thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant)
+                        HorizontalDivider(Modifier.padding(start=if(editMode)52.dp else 4.dp),thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                     }
