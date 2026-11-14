@@ -300,17 +300,13 @@ class MainActivity : ComponentActivity() {
                         Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp)){
                             androidx.compose.foundation.text.BasicTextField(query,{query=it},Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surface).padding(8.dp),singleLine=true,textStyle=androidx.compose.ui.text.TextStyle(fontSize=17.sp,color=MaterialTheme.colorScheme.onSurface),decorationBox={inner->Box(Modifier.fillMaxWidth(),contentAlignment=if(query.isEmpty()) Alignment.Center else Alignment.CenterStart){if(query.isEmpty()) Row(verticalAlignment=Alignment.CenterVertically){Icon(Icons.Default.Search,null,Modifier.size(18.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant);Text(" Поиск",color=MaterialTheme.colorScheme.onSurfaceVariant)};inner()}})
                         }
-                        val visible=remember(people,source) {
-                            when(source) {
-                                "Телефон" -> people.filter { it.id>=0 }
-                                "SIM" -> SimMerge.merge(emptyList(),people.flatMap { it.simSources }).sortedBy { it.name.lowercase(Locale.getDefault()) }
-                                else -> people
-                            }
-                        }
+                        val directory=remember(people,source){directoryRows()}
+                        val visible=remember(directory){directory.map { it.first() }}
+                        val searchable=remember(directory){directory.associateBy {it.first().id}}
                         fun sortName(p:PersonRecord):String = if(surname) p.family.ifBlank {if(p.given.isBlank()) p.name.trim().substringAfterLast(' ') else p.name} else p.given.ifBlank {p.name}
-                        val groups=remember(visible,query,surname){
+                        val groups=remember(directory,query,surname){
                             val collator=java.text.Collator.getInstance(Locale("ru"))
-                            visible.filter{NumberTools.matches(it.name,it.numbers,query)}.sortedWith {a,b->val cmp=collator.compare(sortName(a),sortName(b));if(cmp==0) collator.compare(a.name,b.name) else cmp}.groupBy{sortName(it).trim().firstOrNull()?.takeIf(Char::isLetter)?.uppercaseChar() ?: '#'}
+                            visible.filter{row->searchable[row.id].orEmpty().any{NumberTools.matches(it.name,it.numbers,query)}}.sortedWith {a,b->val cmp=collator.compare(sortName(a),sortName(b));if(cmp==0) collator.compare(a.name,b.name) else cmp}.groupBy{sortName(it).trim().firstOrNull()?.takeIf(Char::isLetter)?.uppercaseChar() ?: '#'}
                         }
                         val state=rememberLazyListState()
                         LaunchedEffect(query,surname,source){state.scrollToItem(0)}
@@ -561,11 +557,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun directoryRows():List<List<PersonRecord>> {
+        val rows=when(source){
+            "Телефон" -> people.filter{it.id>=0}
+            "SIM" -> SimMerge.merge(emptyList(),people.flatMap{it.simSources}.distinct())
+            else -> people
+        }
+        return ContactDirectory.group(rows)
+    }
     @Composable private fun ContactCard(p:PersonRecord) {
         var photoInfo by remember(p.id,p.photo) { mutableStateOf("") }
         var menu by remember { mutableStateOf(false) }
         Column(Modifier.verticalScroll(rememberScrollState())) {
             Box(Modifier.padding(horizontal=16.dp,vertical=8.dp).fillMaxWidth().height(300.dp).clip(RoundedCornerShape(28.dp))) { Photo(p,Modifier.fillMaxSize(),true,onInfo={photoInfo=it});Text(p.name,Modifier.align(Alignment.BottomStart).background(Brush.verticalGradient(listOf(Color.Transparent,Color(0xDD071A31)))).fillMaxWidth().padding(20.dp),fontSize=30.sp,color=Color.White) }
+            val related=remember(people,source,p.id){directoryRows().firstOrNull{group->group.any{it.id==p.id}}.orEmpty()}
+            if(related.size>1){
+                Text("Связанные записи",Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.titleMedium)
+                related.forEachIndexed{index,row->TextButton(onClick={selected=row}){Text((if(row.id==p.id)"✓ " else "")+"Запись ${index+1} · "+row.numbers.joinToString { NumberTools.display(it) })}}
+            }
             if(photoInfo.isNotEmpty()) Text(photoInfo,Modifier.padding(horizontal=16.dp),style=MaterialTheme.typography.bodySmall)
             Row(Modifier.fillMaxWidth().padding(vertical=12.dp),horizontalArrangement=Arrangement.SpaceEvenly) {
                 FilledTonalIconButton(onClick={dial(p.primary)}){Icon(Icons.Default.Call,"Позвонить")}
