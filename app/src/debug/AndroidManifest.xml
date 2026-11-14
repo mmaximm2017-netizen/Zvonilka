@@ -1,0 +1,12 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <application android:label="Звонилка Тест" tools:replace="android:label">
+        <activity android:name=".MainActivity" android:exported="true" tools:node="replace">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <service android:name=".PhoneService" tools:node="remove"/>
+        <receiver android:name=".SystemMissedReceiver" tools:node="remove"/>
+    </application>
+</manifest>

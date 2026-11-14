@@ -17,18 +17,37 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;35.0.0'
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
       - run: |
-          gradle :app:testDebugUnitTest :app:assembleRelease :app:lintRelease --no-daemon || {
+          gradle :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:lintRelease --no-daemon || {
             cat app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt 2>/dev/null || true
             exit 1
           }
+      - name: Verify standalone contact test APK
+        run: |
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          cp app/build/outputs/apk/debug/app-debug.apk Zvonilka-Test-0.12.18.apk
+          "$tools/apksigner" verify Zvonilka-Test-0.12.18.apk
+          "$tools/aapt" dump badging Zvonilka-Test-0.12.18.apk > /tmp/contact-test-badging.txt
+          grep -F "package: name='ru.zvonilka.prototype.contacttest'" /tmp/contact-test-badging.txt
+          grep -F "application-label:'Звонилка Тест'" /tmp/contact-test-badging.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zvonilka-Test-0.12.18
+          path: Zvonilka-Test-0.12.18.apk
       - name: Prepare local signing inputs (no private key in CI)
         run: |
           mkdir -p build/delivery
           cp app/build/outputs/apk/release/app-release-unsigned.apk build/delivery/app-release-unsigned.apk
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          "$tools/aapt" dump badging build/delivery/app-release-unsigned.apk > /tmp/stable-badging.txt
+          grep -F "package: name='ru.zvonilka.prototype.stable' versionCode='46' versionName='0.12.18'" /tmp/stable-badging.txt
+          "$tools/aapt" dump xmltree build/delivery/app-release-unsigned.apk AndroidManifest.xml > /tmp/stable-manifest.txt
+          grep -F 'android.telecom.InCallService' /tmp/stable-manifest.txt
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" build/delivery/apksigner.jar
       - uses: actions/upload-artifact@v4
         with:

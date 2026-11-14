@@ -43,22 +43,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.FilterQuality
 
-val Green=Color(0xFF28AC67)
-val Red=Color(0xFFE34E59)
+val Green=Color(0xFF34C759)
+val Red=Color(0xFFFF3B30)
 val Blue=Color(0xFF3987DF)
-val Ocean=Color(0xFF1765D1)
-val Sky=Color(0xFFE8F3FF)
+val Ocean=Color(0xFF007AFF)
+val Sky=Color(0xFFEFEFF4)
 @Composable fun PhoneTheme(content:@Composable ()->Unit) {
     val colors=if(isSystemInDarkTheme()) darkColorScheme(
-        primary=Color(0xFF9ACBFF),onPrimary=Color(0xFF003263),primaryContainer=Color(0xFF153E68),onPrimaryContainer=Color(0xFFDCEEFF),
+        primary=Color(0xFF409CFF),onPrimary=Color(0xFF003263),primaryContainer=Color(0xFF153E68),onPrimaryContainer=Color(0xFFDCEEFF),
         secondary=Color(0xFF8CD5EB),onSecondary=Color(0xFF003641),secondaryContainer=Color(0xFF193E51),onSecondaryContainer=Color(0xFFC7F1FF),
-        background=Color(0xFF0B1625),onBackground=Color(0xFFEAF3FF),surface=Color(0xFF122338),onSurface=Color(0xFFEAF3FF),
-        surfaceVariant=Color(0xFF1B3048),onSurfaceVariant=Color(0xFFACC1D8),outline=Color(0xFF718AA4),outlineVariant=Color(0xFF29425B)
+        background=Color(0xFF000000),onBackground=Color(0xFFF2F2F7),surface=Color(0xFF1C1C1E),onSurface=Color(0xFFF2F2F7),
+        surfaceVariant=Color(0xFF2C2C2E),onSurfaceVariant=Color(0xFFAEAEB2),outline=Color(0xFF718AA4),outlineVariant=Color(0xFF38383A)
     ) else lightColorScheme(
         primary=Ocean,onPrimary=Color.White,primaryContainer=Color(0xFFDCEEFF),onPrimaryContainer=Color(0xFF123D70),
         secondary=Color(0xFF13718F),onSecondary=Color.White,secondaryContainer=Color(0xFFDDF5FF),onSecondaryContainer=Color(0xFF16475D),
-        background=Color(0xFFF2F7FD),onBackground=Color(0xFF142D49),surface=Color.White,onSurface=Color(0xFF142D49),
-        surfaceVariant=Sky,onSurfaceVariant=Color(0xFF536D87),outline=Color(0xFF7992AB),outlineVariant=Color(0xFFD6E5F3)
+        background=Color(0xFFFFFFFF),onBackground=Color(0xFF18181A),surface=Color.White,onSurface=Color(0xFF18181A),
+        surfaceVariant=Sky,onSurfaceVariant=Color(0xFF68686D),outline=Color(0xFF7992AB),outlineVariant=Color(0xFFD1D1D6)
     )
     MaterialTheme(colorScheme=colors,shapes=Shapes(small=RoundedCornerShape(12.dp),medium=RoundedCornerShape(20.dp),large=RoundedCornerShape(28.dp)),
         typography=Typography(
@@ -70,9 +70,8 @@ val Sky=Color(0xFFE8F3FF)
         ),content=content)
 }
 @Composable fun historyColor(type:Int):Color = when(type) {
-    android.provider.CallLog.Calls.MISSED_TYPE -> if(isSystemInDarkTheme()) Color(0xFFFF9BA9) else Color(0xFFB83245)
-    android.provider.CallLog.Calls.OUTGOING_TYPE -> if(isSystemInDarkTheme()) Color(0xFF7BDAAE) else Color(0xFF187544)
-    else -> MaterialTheme.colorScheme.primary
+    android.provider.CallLog.Calls.MISSED_TYPE -> if(isSystemInDarkTheme()) Color(0xFFFF6961) else Color(0xFFD92D25)
+    else -> MaterialTheme.colorScheme.onSurface
 }
 fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
     topStart=if(first) 20.dp else 0.dp,topEnd=if(first) 20.dp else 0.dp,
@@ -92,23 +91,26 @@ fun listRowShape(first:Boolean,last:Boolean)=RoundedCornerShape(
         Column(Modifier.padding(15.dp),verticalArrangement=Arrangement.spacedBy(8.dp),content=content)
     }
 }
-@Composable fun Photo(person:PersonRecord?,modifier:Modifier=Modifier,full:Boolean=false) {
+@Composable fun Photo(person:PersonRecord?,modifier:Modifier=Modifier,full:Boolean=false,initialsName:String?=null,showPlaceholder:Boolean=true,onInfo:((String)->Unit)?=null) {
     val thumbnail=remember(person?.id,person?.photo) { person?.photo?.let { BitmapFactory.decodeByteArray(it,0,it.size)?.asImageBitmap() } }
     val context=LocalContext.current.applicationContext
     // Key the state as well as the coroutine so a different caller never sees the old photo.
     val large = key(person?.id,person?.photo,full) {
         val loaded by produceState<ImageBitmap?>(initialValue=null) {
-            if(full && person!=null) value=withContext(Dispatchers.IO) {
-                PhoneData(context).displayPhoto(person.id)?.asImageBitmap()
+            if(full && person!=null) {
+                val (photo,info)=withContext(Dispatchers.IO) { PhoneData(context).resolvePhoto(person.id) }
+                value=photo?.asImageBitmap()
+                onInfo?.invoke(if(photo==null && thumbnail!=null) "Миниатюра: ${thumbnail.width} × ${thumbnail.height} пикс." else info)
             }
         }
         loaded
     }
     val bitmap=large ?: thumbnail
+    if(bitmap==null && !showPlaceholder) return
     Box(modifier.background(Brush.linearGradient(if(full) listOf(Color(0xFF123D70),Color(0xFF245F97)) else listOf(MaterialTheme.colorScheme.primaryContainer,MaterialTheme.colorScheme.secondaryContainer))),contentAlignment=Alignment.Center) {
         if(bitmap!=null) Image(bitmap,null,Modifier.fillMaxSize(),contentScale=ContentScale.Crop,filterQuality=FilterQuality.High)
         else if(person==null) Icon(Icons.Outlined.Person,"Нет фото",Modifier.size(if(full) 96.dp else 28.dp),tint=if(full) Color.White else MaterialTheme.colorScheme.primary)
-        else Text(NumberTools.initials(person.name),fontSize=if(full) 72.sp else 19.sp,color=if(full) Color.White else MaterialTheme.colorScheme.onPrimaryContainer)
+        else Text(NumberTools.initials(initialsName ?: person.name),fontSize=if(full) 72.sp else 19.sp,color=if(full) Color.White else MaterialTheme.colorScheme.onPrimaryContainer)
     }
 }
 @OptIn(ExperimentalFoundationApi::class)

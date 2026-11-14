@@ -10,7 +10,7 @@ import java.text.Collator
 import java.util.Locale
 
 // A record belongs to one local RawContact, never to an aggregated cloud contact.
-data class PersonRecord(val id: Long, val name: String, val numbers: List<String>, val photo: ByteArray? = null, val simSources:List<SimSource> = emptyList()) {
+data class PersonRecord(val id: Long, val name: String, val numbers: List<String>, val photo: ByteArray? = null, val simSources:List<SimSource> = emptyList(), val writableLocal:Boolean = true, val given:String="", val family:String="", val contactId:Long=0, val readOnly:Boolean=false, val writeFlagKnown:Boolean=true) {
     val primary get() = numbers.firstOrNull().orEmpty()
 }
 data class HistoryRecord(val id: Long, val number: String, val type: Int, val date: Long, val seconds: Long, val accountId: String?)
@@ -23,24 +23,46 @@ class PhoneData(private val context: Context) {
     fun localContacts(): List<PersonRecord> {
         if (!allowed(android.Manifest.permission.READ_CONTACTS)) return emptyList()
         val ids = mutableListOf<Long>()
-        cr.query(CC.RawContacts.CONTENT_URI, arrayOf(CC.RawContacts._ID), local, null, null)?.use { c -> while(c.moveToNext()) ids.add(c.getLong(0)) }
+        val writable = mutableSetOf<Long>()
+        val aggregate=mutableMapOf<Long,Long>(); val readOnly=mutableSetOf<Long>()
+        val simAccounts = if(android.os.Build.VERSION.SDK_INT >= 31)
+            runCatching { CC.SimContacts.getSimAccounts(cr).map { it.accountName to it.accountType }.toSet() }.getOrDefault(emptySet())
+        else emptySet()
+        // Let each provider return its supported columns. Some OEMs reject an
+        // explicit request for RAW_CONTACT_IS_READ_ONLY before returning a cursor.
+        var writeFlagKnown=false
+        cr.query(CC.RawContacts.CONTENT_URI, null, "${CC.RawContacts.DELETED} = 0", null, null)?.use { c ->
+            val idCol=c.getColumnIndexOrThrow(CC.RawContacts._ID)
+            val nameCol=c.getColumnIndexOrThrow(CC.RawContacts.ACCOUNT_NAME)
+            val typeCol=c.getColumnIndexOrThrow(CC.RawContacts.ACCOUNT_TYPE)
+            val aggregateCol=c.getColumnIndexOrThrow(CC.RawContacts.CONTACT_ID)
+            val flagCol=c.getColumnIndex(CC.RawContacts.RAW_CONTACT_IS_READ_ONLY)
+            writeFlagKnown=flagCol>=0
+            while(c.moveToNext()) {
+                val id=c.getLong(idCol); val name=c.getString(nameCol); val type=c.getString(typeCol)
+                if((name to type) in simAccounts || type in setOf("vnd.sec.contact.sim","vnd.sec.contact.sim2","com.android.sim")) continue
+                aggregate[id]=c.getLong(aggregateCol); if(flagCol>=0 && c.getInt(flagCol)!=0) readOnly.add(id)
+                ids.add(id)
+                if(type==null || type=="vnd.sec.contact.phone") writable.add(id)
+            }
+        }
         val result = mutableListOf<PersonRecord>()
         ids.chunked(300).forEach { chunk ->
-            data class Acc(var name: String = "", val nums: MutableList<Pair<Boolean,String>> = mutableListOf(), var photo: ByteArray? = null)
+            data class Acc(var name: String = "", var given:String="",var family:String="", val nums: MutableList<Pair<Boolean,String>> = mutableListOf(), var photo: ByteArray? = null)
             val map = chunk.associateWith { Acc() }
-            cr.query(CC.Data.CONTENT_URI, arrayOf(CC.Data.RAW_CONTACT_ID,CC.Data.MIMETYPE,CC.Data.DATA1,CC.Data.IS_SUPER_PRIMARY,CC.Data.DATA15),
+            cr.query(CC.Data.CONTENT_URI, arrayOf(CC.Data.RAW_CONTACT_ID,CC.Data.MIMETYPE,CC.Data.DATA1,CC.Data.IS_SUPER_PRIMARY,CC.Data.DATA15,CC.Data.DATA2,CC.Data.DATA3),
                 "${CC.Data.RAW_CONTACT_ID} IN (${chunk.joinToString(",") { "?" }}) AND ${CC.Data.MIMETYPE} IN (?,?,?)",
                 (chunk.map { it.toString() } + listOf(CC.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE,CC.CommonDataKinds.Phone.CONTENT_ITEM_TYPE,CC.CommonDataKinds.Photo.CONTENT_ITEM_TYPE)).toTypedArray(), null)?.use { c ->
                 while(c.moveToNext()) {
                     val item=map[c.getLong(0)] ?: continue
                     when(c.getString(1)) {
-                        CC.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE -> item.name=c.getString(2).orEmpty()
+                        CC.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE -> {item.name=c.getString(2).orEmpty();item.given=c.getString(5).orEmpty();item.family=c.getString(6).orEmpty()}
                         CC.CommonDataKinds.Phone.CONTENT_ITEM_TYPE -> item.nums.add((c.getInt(3)==1) to c.getString(2).orEmpty())
                         CC.CommonDataKinds.Photo.CONTENT_ITEM_TYPE -> item.photo=if(c.isNull(4)) null else c.getBlob(4)
                     }
                 }
             }
-            map.forEach { (id,a) -> result.add(PersonRecord(id,a.name.ifBlank { "Без имени" },a.nums.sortedByDescending { it.first }.map { it.second }.distinctBy(NumberTools::key),a.photo)) }
+            map.forEach { (id,a) -> if(id in writable || a.nums.isNotEmpty()) result.add(PersonRecord(id,a.name.ifBlank { "Без имени" },a.nums.sortedByDescending { it.first }.map { it.second }.distinctBy(NumberTools::key),a.photo,writableLocal=id in writable,given=a.given,family=a.family,contactId=aggregate[id] ?: 0,readOnly=id in readOnly,writeFlagKnown=writeFlagKnown)) }
         }
         val collator=Collator.getInstance(Locale("ru"))
         return result.sortedWith { a,b -> collator.compare(a.name,b.name) }
@@ -78,7 +100,13 @@ class PhoneData(private val context: Context) {
         val results=cr.applyBatch(CC.AUTHORITY,ops)
         val savedId=id ?: ContentUris.parseId(requireNotNull(results[0].uri))
         if(photo!=null && (id==null || replacePhoto)) CallPhotoStore.write(context,savedId,photo,sourcePhoto ?: photo,thumbnail(savedId))
+        if(replacePhoto && photo==null) CallPhotoStore.remove(context,savedId)
         return savedId
+    }
+    fun deleteAccountRecord(p:PersonRecord) {
+        require(p.writeFlagKnown && !p.writableLocal && !p.readOnly && p.id>=0)
+        check(cr.delete(CC.RawContacts.CONTENT_URI,"${CC.RawContacts._ID}=? AND ${CC.RawContacts.CONTACT_ID}=? AND ${CC.RawContacts.RAW_CONTACT_IS_READ_ONLY}=0",arrayOf(p.id.toString(),p.contactId.toString()))==1){"Аккаунт не разрешил удалить контакт"}
+        CallPhotoStore.remove(context,p.id)
     }
     fun deleteContact(id:Long) {
         requireLocal(id)
@@ -106,25 +134,38 @@ class PhoneData(private val context: Context) {
             } ?: error("Не удалось проверить удаление")
         }
     }
-    // Read the display photo of this local raw contact, never an aggregated cloud photo.
+    // Read access follows READ_CONTACTS. Mutations retain their separate local-account guard.
     // Called on Dispatchers.IO only, and only for a large photo surface.
-    fun displayPhoto(id: Long): android.graphics.Bitmap? {
-        if(id < 0 || !allowed(android.Manifest.permission.READ_CONTACTS)) return null
-        return try {
-            requireLocal(id)
-            CallPhotoStore.read(context,id,thumbnail(id))?.let { bytes ->
-                android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.size)?.let{return it}
-            }
-            val uri=Uri.withAppendedPath(ContentUris.withAppendedId(CC.RawContacts.CONTENT_URI,id),CC.RawContacts.DisplayPhoto.CONTENT_DIRECTORY)
-            ImageDecoder.decodeBitmap(ImageDecoder.createSource(cr,uri)) { decoder, info, _ ->
-                val scale=minOf(1f,2048f/maxOf(info.size.width,info.size.height))
-                decoder.setTargetSize((info.size.width*scale).toInt().coerceAtLeast(1),(info.size.height*scale).toInt().coerceAtLeast(1))
-                decoder.allocator=ImageDecoder.ALLOCATOR_SOFTWARE
-            }
-        } catch (_: java.io.IOException) { null }
-          catch (_: SecurityException) { null }
-          catch (_: IllegalArgumentException) { null }
-          catch (_: IllegalStateException) { null }
+    fun displayPhoto(id:Long):android.graphics.Bitmap? = resolvePhoto(id).first
+    fun resolvePhoto(id:Long):Pair<android.graphics.Bitmap?,String> {
+        if(id<0 || !allowed(android.Manifest.permission.READ_CONTACTS)) return null to "Большое фото недоступно"
+        val thumb=runCatching { thumbnail(id) }.getOrNull()
+        val saved=runCatching { CallPhotoStore.read(context,id,thumb) }.getOrNull()
+        val raw=ContentUris.withAppendedId(CC.RawContacts.CONTENT_URI,id)
+        val aggregate=runCatching {
+            val key=cr.query(raw,arrayOf(CC.RawContacts.CONTACT_ID),null,null,null)?.use { if(it.moveToFirst()) it.getLong(0) else null }
+            key?.let { cr.query(ContentUris.withAppendedId(CC.Contacts.CONTENT_URI,it),arrayOf(CC.Contacts.PHOTO_URI),null,null,null)?.use { c->if(c.moveToFirst()) c.getString(0)?.let(Uri::parse) else null } }
+        }.getOrNull()
+        data class Source(val name:String,val open:()->java.io.InputStream?,val w:Int,val h:Int)
+        val sources=mutableListOf<Source>()
+        fun add(name:String, open:()->java.io.InputStream?) {
+            val bounds=android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds=true }
+            runCatching { open()?.use { android.graphics.BitmapFactory.decodeStream(it,null,bounds) } }
+            if(bounds.outWidth>0 && bounds.outHeight>0) sources+=Source(name,open,bounds.outWidth,bounds.outHeight)
+        }
+        if(saved!=null) add("Фото звонилки"){saved.inputStream()}
+        add("Запись контакта"){cr.openInputStream(Uri.withAppendedPath(raw,CC.RawContacts.DisplayPhoto.CONTENT_DIRECTORY))}
+        if(aggregate!=null) add("Карточка Android"){cr.openInputStream(aggregate)}
+        if(thumb!=null) add("Миниатюра"){thumb.inputStream()}
+        for(src in sources.sortedByDescending { it.w.toLong()*it.h }) {
+            val opts=android.graphics.BitmapFactory.Options()
+            var sample=1
+            while(maxOf(src.w,src.h)/sample>3072) sample*=2
+            opts.inSampleSize=sample
+            val bitmap=runCatching { src.open()?.use { android.graphics.BitmapFactory.decodeStream(it,null,opts) } }.getOrNull()
+            if(bitmap!=null) return bitmap to "${src.name}: ${src.w} × ${src.h} пикс."
+        }
+        return null to "Большое фото не найдено"
     }
     private fun thumbnail(id:Long):ByteArray? = cr.query(CC.Data.CONTENT_URI,arrayOf(CC.CommonDataKinds.Photo.PHOTO),"${CC.Data.RAW_CONTACT_ID}=? AND ${CC.Data.MIMETYPE}=?",arrayOf(id.toString(),CC.CommonDataKinds.Photo.CONTENT_ITEM_TYPE),null)?.use { if(it.moveToFirst() && !it.isNull(0)) it.getBlob(0) else null }
     fun editPhoto(id:Long):ByteArray? {
@@ -135,7 +176,7 @@ class PhoneData(private val context: Context) {
     }
     fun exportContacts(people:List<PersonRecord>):List<PersonRecord> {
         var total=0
-        return people.filter{it.id>=0}.map { p->
+        return people.filter{it.id>=0 && it.writableLocal}.map { p->
             val full=displayPhoto(p.id)
             val bytes=if(full!=null) try { compactPhoto(full) } finally {full.recycle()} else p.photo
             total+=bytes?.size ?: 0

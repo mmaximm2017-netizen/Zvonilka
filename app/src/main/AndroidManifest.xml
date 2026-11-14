@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.WRITE_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <application android:name=".ZvonilkaApplication" android:label="Звонилка" android:theme="@style/AppTheme" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter>
@@ -27,7 +28,7 @@
                 <data android:scheme="tel" />
             </intent-filter>
         </activity>
-        <activity android:name=".CallActivity" android:exported="false" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="ru.zvonilka.prototype.call" android:showWhenLocked="true" android:turnScreenOn="true" />
+        <activity android:name=".CallActivity" android:exported="false" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="${applicationId}.call" android:showWhenLocked="true" android:turnScreenOn="true" />
         <service android:name=".PhoneService" android:exported="true" android:permission="android.permission.BIND_INCALL_SERVICE">
             <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
             <intent-filter><action android:name="android.telecom.InCallService" /></intent-filter>

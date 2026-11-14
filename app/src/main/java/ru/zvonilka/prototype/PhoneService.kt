@@ -8,6 +8,17 @@ import android.os.Looper
 import android.telecom.*
 
 class PhoneService : InCallService(), android.hardware.SensorEventListener {
+    private var proximity: android.os.PowerManager.WakeLock? = null
+    @android.annotation.SuppressLint("WakelockTimeout")
+    private fun syncProximity(route: Int? = callAudioState?.route) {
+        val needed = route == CallAudioState.ROUTE_EARPIECE && ids.keys.any { it.state == Call.STATE_ACTIVE || it.state == Call.STATE_DIALING }
+        if (!needed) { releaseProximity(); return }
+        val power = getSystemService(android.os.PowerManager::class.java)
+        if (proximity == null && power.isWakeLockLevelSupported(android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK))
+            proximity = power.newWakeLock(android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "Zvonilka:callProximity").apply { setReferenceCounted(false) }
+        proximity?.let { if (!it.isHeld) it.acquire() }
+    }
+    private fun releaseProximity() { proximity?.let { if(it.isHeld) it.release() } }
     private var contactsReady=false
     private val seenEnded = mutableSetOf<Call>()
     private var sawFaceUp = false
@@ -109,7 +120,23 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
     private fun refresh(call: Call, key: String) {
         val id = ids[call] ?: return
         if (call.state == Call.STATE_DISCONNECTED) { removeCall(call); return }
+        syncProximity()
         val previousState = publishedStates.put(call, call.state)
+        // Only the initial outgoing setup -> connected transition, never a resume from hold.
+        if (call.state == Call.STATE_ACTIVE && call.details.callDirection == Call.Details.DIRECTION_OUTGOING &&
+            (previousState == Call.STATE_DIALING || previousState == Call.STATE_CONNECTING ||
+             previousState == Call.STATE_SELECT_PHONE_ACCOUNT)) {
+            val vibrator = if (Build.VERSION.SDK_INT >= 31)
+                getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
+            else getSystemService(android.os.Vibrator::class.java)
+            if (vibrator?.hasVibrator() == true) {
+                val pulse = android.os.VibrationEffect.createOneShot(80L, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
+                if (Build.VERSION.SDK_INT >= 33) vibrator.vibrate(pulse,
+                    android.os.VibrationAttributes.createForUsage(android.os.VibrationAttributes.USAGE_COMMUNICATION_REQUEST))
+                else vibrator.vibrate(pulse, android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_REQUEST).build())
+            }
+        }
         if(previousState != call.state) CallDiagnostics.record(this, "call_state=${call.state}")
         val ringing = call.state == Call.STATE_RINGING
         if(call.state==Call.STATE_ACTIVE) call.details.accountHandle?.let { Dialing.remember(this,CallStore.label(call),it) }
@@ -136,7 +163,18 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         // Samsung Android 16 (API 36) rejects our CallStyle payload at NotificationManager
         // with IllegalArgumentException. Use a standard CATEGORY_CALL notification on API 36+
         // while keeping the same actions and full-screen intent.
-        if (Build.VERSION.SDK_INT in 31..35) {
+        val customRinging = ringing && !getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        fun incomingButtons(target: Notification.Builder) {
+            val view = android.widget.RemoteViews(packageName, R.layout.incoming_banner).apply {
+                setTextViewText(R.id.caller, displayName)
+                setOnClickPendingIntent(R.id.answer_call, action("answer"))
+                setOnClickPendingIntent(R.id.reject_call, action("reject"))
+            }
+            target.setStyle(Notification.DecoratedCustomViewStyle())
+                .setCustomContentView(view).setCustomBigContentView(view).setCustomHeadsUpContentView(view)
+        }
+        if (customRinging) incomingButtons(builder)
+        else if (Build.VERSION.SDK_INT in 31..35) {
             val person = Person.Builder().setName(displayName).setImportant(true).build()
             builder.setStyle(if (ringing) Notification.CallStyle.forIncomingCall(person, action("reject"), action("answer"))
                 else Notification.CallStyle.forOngoingCall(person, action("hangup")))
@@ -160,9 +198,9 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
                     .setContentIntent(open)
                 if (ringing) {
                     fallback.setFullScreenIntent(open,true)
-                    fallback.addAction(Notification.Action.Builder(null,"Принять",action("answer")).build())
+                    if(customRinging) incomingButtons(fallback) else fallback.addAction(Notification.Action.Builder(null,"Принять",action("answer")).build())
                 }
-                fallback.addAction(Notification.Action.Builder(null,if(ringing) "Отклонить" else "Завершить",action(if(ringing) "reject" else "hangup")).build())
+                if(!customRinging) fallback.addAction(Notification.Action.Builder(null,if(ringing) "Отклонить" else "Завершить",action(if(ringing) "reject" else "hangup")).build())
                 manager.notify(id,fallback.build())
             }
         }
@@ -194,16 +232,22 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         }
     }
     override fun onBringToForeground(showDialpad: Boolean) = showCall()
-    override fun onCallAudioStateChanged(audioState: CallAudioState?) { CallStore.changed() }
+    override fun onCallAudioStateChanged(audioState: CallAudioState?) { syncProximity(audioState?.route); CallStore.changed() }
     private fun removeCall(call: Call) {
         if(call in ids) CallStore.calls.filterValues{it===call}.keys.forEach { key->
             val start=call.details.connectTimeMillis
             CallStore.endedSeconds[key]=if(start>0)((System.currentTimeMillis()-start)/1000).coerceAtLeast(0) else 0
             while(CallStore.endedSeconds.size>8)CallStore.endedSeconds.remove(CallStore.endedSeconds.keys.first())
         }
+        if(call in ids && call.details.callDirection == Call.Details.DIRECTION_OUTGOING &&
+            call.details.connectTimeMillis <= 0 && call.details.disconnectCause.code in
+            listOf(DisconnectCause.LOCAL, DisconnectCause.CANCELED)) {
+            CancelledCalls.record(this, call.details.creationTimeMillis, call.details.handle?.schemeSpecificPart.orEmpty())
+        }
         if(call in ids) CallDiagnostics.record(this, "call_removed state=${call.state}")
         if(call.details.disconnectCause.code==DisconnectCause.MISSED && seenEnded.add(call)) MissedCalls.add(this,call.details.handle?.schemeSpecificPart.orEmpty())
         ids.remove(call)?.let { manager.cancel(it) }
+        syncProximity()
         publishedStates.remove(call)
         callbacks.remove(call)?.let { call.unregisterCallback(it) }
         CallStore.calls.filterValues{it===call}.keys.forEach{CallerId.results.remove(it)}
@@ -216,6 +260,7 @@ class PhoneService : InCallService(), android.hardware.SensorEventListener {
         super.onCallRemoved(call)
     }
     private fun clearSession() {
+        releaseProximity()
         handler.removeCallbacks(reconcile)
         sensors.unregisterListener(this)
         seenEnded.clear()
